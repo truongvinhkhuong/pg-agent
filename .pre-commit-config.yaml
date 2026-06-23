@@ -1,0 +1,33 @@
+# Pre-commit anti-leak guardrails.
+#
+# IMPORTANT: pre-commit hooks are LOCAL and bypassable (`git commit --no-verify`).
+# They are defense-in-depth, NOT the control. The real control is SERVER-SIDE:
+#   * GitHub Secret Scanning + Push Protection (Settings > Code security)
+#   * branch protection: require a CI job that re-runs detect-secrets on the PR
+#   * never let real data enter the repo (synthetic-only policy) in the first place
+#
+# Install:  pip install pre-commit detect-secrets && pre-commit install
+repos:
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".detect-secrets.baseline"]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=200"]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  # Custom: block raw business-text dumps (invoice-like blobs, MST, long records).
+  - repo: local
+    hooks:
+      - id: no-raw-data-dumps
+        name: block raw data dumps (invoice-like / tax-id / huge text)
+        entry: python3 scripts/check_no_raw_dumps.py
+        language: system
+        types: [text]
+        exclude: ^(data/erp_authzbench/(generate_synthetic|attacks)\.py|docs/|README\.md)

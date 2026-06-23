@@ -1,0 +1,9 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_sale_order_team_base,access.pco.sale.order.team.base,model_pco_sale_order,group_team_base,1,0,0,0
+access_sale_order_line_team_base,access.pco.sale.order.line.team.base,model_pco_sale_order_line,group_team_base,1,0,0,0
+access_sale_order_payment_team_base,access.pco.sale.order.payment.team.base,model_pco_sale_order_payment,group_team_base,1,0,0,0
+access_sale_order_guarantee_team_base,access.pco.sale.order.guarantee.team.base,model_pco_sale_order_guarantee,group_team_base,1,0,0,0
+access_sale_order_admin,access.pco.sale.order.admin,model_pco_sale_order,base.group_system,1,1,1,1
+access_sale_order_line_admin,access.pco.sale.order.line.admin,model_pco_sale_order_line,base.group_system,1,1,1,1
+access_sale_order_payment_admin,access.pco.sale.order.payment.admin,model_pco_sale_order_payment,base.group_system,1,1,1,1
+access_sale_order_guarantee_admin,access.pco.sale.order.guarantee.admin,model_pco_sale_order_guarantee,base.group_system,1,1,1,1

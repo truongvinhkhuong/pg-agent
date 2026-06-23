@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+        <!-- Least-privilege persona: a salesperson who may see ONLY their own lines
+             (within their team). When a user has this group, the guard adds the
+             owner_path = uid clause. Used by the `ownership-bypass` benchmark class. -->
+        <record id="group_pep_own_only" model="res.groups">
+            <field name="name">PG-Agent — Chỉ xem dữ liệu của chính mình</field>
+            <field name="comment">Khi gán, guard giới hạn agent chỉ truy vấn record do user sở hữu (salesperson_id = uid).</field>
+        </record>
+    </data>
+</odoo>

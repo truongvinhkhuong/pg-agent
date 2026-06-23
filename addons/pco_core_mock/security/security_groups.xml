@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ============================================================
+         LAYER 2 — GROUP LATTICE (faithful copy of real pco_core topology)
+         This is part of the research CORE: the access-control structure the
+         benchmark probes. Mirrors custom-addons/internal/pco_core/security/team_security.xml.
+         ============================================================ -->
+    <data noupdate="0">
+
+        <record id="module_category_pco_team" model="ir.module.category">
+            <field name="name">Phân quyền theo Team KD</field>
+            <field name="sequence">20</field>
+        </record>
+
+        <!-- Odoo 19: gom nhóm trong form User bằng res.groups.privilege. -->
+        <record id="privilege_pco_team" model="res.groups.privilege">
+            <field name="name">Báo cáo theo Team (TTV/TTF/TTR)</field>
+            <field name="category_id" ref="module_category_pco_team"/>
+            <field name="sequence">20</field>
+        </record>
+
+        <!-- Hidden base group: holds the read ACLs; implied by the 4 team groups. -->
+        <record id="group_team_base" model="res.groups">
+            <field name="name">Team — quyền đọc báo cáo (nền)</field>
+            <field name="comment">Cấp quyền ĐỌC 4 model đơn bán. Không gán trực tiếp; kế thừa qua nhóm team.</field>
+        </record>
+
+        <record id="group_team_ttv" model="res.groups">
+            <field name="name">Team TTV</field>
+            <field name="privilege_id" ref="privilege_pco_team"/>
+            <field name="implied_ids" eval="[(4, ref('base.group_user')), (4, ref('group_team_base'))]"/>
+        </record>
+        <record id="group_team_ttf" model="res.groups">
+            <field name="name">Team TTF</field>
+            <field name="privilege_id" ref="privilege_pco_team"/>
+            <field name="implied_ids" eval="[(4, ref('base.group_user')), (4, ref('group_team_base'))]"/>
+        </record>
+        <record id="group_team_ttr" model="res.groups">
+            <field name="name">Team TTR</field>
+            <field name="privilege_id" ref="privilege_pco_team"/>
+            <field name="implied_ids" eval="[(4, ref('base.group_user')), (4, ref('group_team_base'))]"/>
+        </record>
+        <record id="group_team_view_all" model="res.groups">
+            <field name="name">Báo cáo theo Team — Xem tất cả</field>
+            <field name="privilege_id" ref="privilege_pco_team"/>
+            <field name="implied_ids" eval="[(4, ref('base.group_user')), (4, ref('group_team_base'))]"/>
+        </record>
+
+        <!-- Admin tự động Xem tất cả (account module không bắt buộc trong mock). -->
+        <record id="base.group_system" model="res.groups">
+            <field name="implied_ids" eval="[(4, ref('group_team_view_all'))]"/>
+        </record>
+
+    </data>
+</odoo>

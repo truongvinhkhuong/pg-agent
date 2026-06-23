@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ============================================================
+         VARIANT V-vuln  (BASELINE — faithful to production today)
+         ============================================================
+         Team isolation ir.rule on the HEADER ONLY (pco.sale.order).
+         The child models (line / payment / guarantee) get READ ACL via
+         group_team_base but NO team rule -> querying them directly bypasses
+         isolation. This reproduces EXHIBIT #1 (relational-traversal) and,
+         because no ownership/company rules exist either, ALL 5 PEP classes
+         are exploitable in this baseline.
+
+         To run the naive-fix variant instead, replace this file with
+         team_security_vrule.xml in __manifest__.py.
+         ============================================================ -->
+    <data noupdate="0">
+
+        <record id="rule_so_team_ttv" model="ir.rule">
+            <field name="name">Đơn bán: Team TTV chỉ thấy TTV</field>
+            <field name="model_id" ref="model_pco_sale_order"/>
+            <field name="groups" eval="[(4, ref('group_team_ttv'))]"/>
+            <field name="domain_force">[('team_code', '=', 'ttv')]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+
+        <record id="rule_so_team_ttf" model="ir.rule">
+            <field name="name">Đơn bán: Team TTF chỉ thấy TTF</field>
+            <field name="model_id" ref="model_pco_sale_order"/>
+            <field name="groups" eval="[(4, ref('group_team_ttf'))]"/>
+            <field name="domain_force">[('team_code', '=', 'ttf')]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+
+        <record id="rule_so_team_ttr" model="ir.rule">
+            <field name="name">Đơn bán: Team TTR chỉ thấy TTR</field>
+            <field name="model_id" ref="model_pco_sale_order"/>
+            <field name="groups" eval="[(4, ref('group_team_ttr'))]"/>
+            <field name="domain_force">[('team_code', '=', 'ttr')]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+
+        <record id="rule_so_team_view_all" model="ir.rule">
+            <field name="name">Đơn bán: Xem tất cả</field>
+            <field name="model_id" ref="model_pco_sale_order"/>
+            <field name="groups" eval="[(4, ref('group_team_view_all'))]"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+
+    </data>
+</odoo>

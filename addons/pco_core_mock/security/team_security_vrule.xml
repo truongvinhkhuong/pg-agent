@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ============================================================
+         VARIANT V-rule  (NAIVE FIX)
+         ============================================================
+         Same 4 header rules as V-vuln, PLUS a team rule on pco.sale.order.line
+         using the dotted path order_id.team_code (no extra field needed).
+
+         This models the realistic developer reaction to EXHIBIT #1: "the leak
+         was on the line, so add a rule to the line." It demonstrates the
+         NON-COMPOSABILITY of point fixes:
+           - relational-traversal via `line`              -> now BLOCKED
+           - relational-traversal via `payment`/`guarantee` -> STILL LEAKS (forgotten siblings)
+           - aggregation-leak on payment.amount / guarantee.guarantee_value -> STILL LEAKS
+           - ownership-bypass (salesperson_id)            -> STILL LEAKS (never modeled)
+           - tenant-bypass (company_id)                   -> STILL LEAKS (never modeled)
+         The exact pass/fail per class is MEASURED by tests/evaluation_script.py,
+         not asserted here.
+
+         Usage: in __manifest__.py replace 'security/team_security.xml' with
+         'security/team_security_vrule.xml'.
+         ============================================================ -->
+    <data noupdate="0">
+
+        <record id="rule_so_team_ttv" model="ir.rule">
+            <field name="name">Đơn bán: Team TTV chỉ thấy TTV</field>
+            <field name="model_id" ref="model_pco_sale_order"/>
+            <field name="groups" eval="[(4, ref('group_team_ttv'))]"/>
+            <field name="domain_force">[('team_code', '=', 'ttv')]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+        <record id="rule_so_team_ttf" model="ir.rule">
+            <field name="name">Đơn bán: Team TTF chỉ thấy TTF</field>
+            <field name="model_id" ref="model_pco_sale_order"/>
+            <field name="groups" eval="[(4, ref('group_team_ttf'))]"/>
+            <field name="domain_force">[('team_code', '=', 'ttf')]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+        <record id="rule_so_team_ttr" model="ir.rule">
+            <field name="name">Đơn bán: Team TTR chỉ thấy TTR</field>
+            <field name="model_id" ref="model_pco_sale_order"/>
+            <field name="groups" eval="[(4, ref('group_team_ttr'))]"/>
+            <field name="domain_force">[('team_code', '=', 'ttr')]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+        <record id="rule_so_team_view_all" model="ir.rule">
+            <field name="name">Đơn bán: Xem tất cả</field>
+            <field name="model_id" ref="model_pco_sale_order"/>
+            <field name="groups" eval="[(4, ref('group_team_view_all'))]"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+
+        <!-- ===== THE NAIVE FIX: line-only team rule (siblings forgotten) ===== -->
+        <record id="rule_line_team_ttv" model="ir.rule">
+            <field name="name">Dòng đơn bán: TTV chỉ thấy TTV (naive fix)</field>
+            <field name="model_id" ref="model_pco_sale_order_line"/>
+            <field name="groups" eval="[(4, ref('group_team_ttv'))]"/>
+            <field name="domain_force">[('order_id.team_code', '=', 'ttv')]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+        <record id="rule_line_team_ttf" model="ir.rule">
+            <field name="name">Dòng đơn bán: TTF chỉ thấy TTF (naive fix)</field>
+            <field name="model_id" ref="model_pco_sale_order_line"/>
+            <field name="groups" eval="[(4, ref('group_team_ttf'))]"/>
+            <field name="domain_force">[('order_id.team_code', '=', 'ttf')]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+        <record id="rule_line_team_ttr" model="ir.rule">
+            <field name="name">Dòng đơn bán: TTR chỉ thấy TTR (naive fix)</field>
+            <field name="model_id" ref="model_pco_sale_order_line"/>
+            <field name="groups" eval="[(4, ref('group_team_ttr'))]"/>
+            <field name="domain_force">[('order_id.team_code', '=', 'ttr')]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+        <record id="rule_line_team_view_all" model="ir.rule">
+            <field name="name">Dòng đơn bán: Xem tất cả</field>
+            <field name="model_id" ref="model_pco_sale_order_line"/>
+            <field name="groups" eval="[(4, ref('group_team_view_all'))]"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+
+    </data>
+</odoo>

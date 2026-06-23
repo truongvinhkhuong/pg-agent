@@ -1,0 +1,51 @@
+# ── Odoo runtime / config (never commit) ────────────────────────────────────
+*.conf
+!config/odoo.mock.conf
+!config/odoo.prod.conf
+.odoorc
+*.log
+filestore/
+sessions/
+data_dir/
+*.sql
+*.dump
+docs/proposal-pg-agent-v3.1.md
+docs/sprint-backlog-pg-agent-v3.1.md
+
+# ── Secrets / env ────────────────────────────────────────────────────────────
+.env
+.env.*
+*.pem
+*.key
+secrets.*
+credentials.*
+
+# ── RAG / vector stores / model caches ───────────────────────────────────────
+*.vectorstore/
+vectorstore/
+chroma/
+.chroma/
+*.faiss
+*.index
+*.pkl
+embeddings/
+.cache/
+.huggingface/
+
+# ── Synthetic data dumps (keep the GENERATOR, not generated payloads) ─────────
+data/erp_authzbench/*.json
+data/erp_authzbench/*.csv
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# ── OS / editor ──────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
