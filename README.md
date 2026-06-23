@@ -1,5 +1,7 @@
 # PG-Agent — Permission-aware RAG over Odoo ERP + ERP-AuthZBench
 
+[![CI](https://github.com/truongvinhkhuong/pg-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/truongvinhkhuong/pg-agent/actions/workflows/ci.yml)
+
 Public academic artifact for a permission-aware RAG agent on Odoo. It ships:
 
 - **`pg_agent_guard`** — a model-agnostic Policy Enforcement Point (PEP), the research CORE.
@@ -123,6 +125,19 @@ Repeat after switching `pco_core_mock/__manifest__.py` to `team_security_vrule.x
 reinstalling (`-u pco_core_mock`) to produce the V-rule row of the matrix.
 
 On Google Colab: `scripts/colab_bootstrap.py` → `public_path()` (no token needed).
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) gates every push to `main` and every PR:
+
+- **`static-checks`** — syntax (`compileall`), the offline unit tests, and the **secret + raw-data
+  regression gate** (`detect-secrets` against `.detect-secrets.baseline` + `check_no_raw_dumps.py`,
+  run via `pre-commit`). A new secret or invoice-like blob turns CI red.
+- **`authzbench`** — installs `pco_core_mock` + `pg_agent_guard` in **Odoo 19** (+ Postgres) and runs
+  `ci_gate(env)` over **both schema variants** (V-vuln and V-rule). It fails unless the guard is
+  clean (Unauthorized-Access = Data-Leakage = Existence-Inference = False-Block = 0) **and** the
+  benchmark is meaningful (attacks actually fire when undefended). This is the regression gate: any
+  change that reopens a leak turns CI red.
 
 ## Anti-leak
 

@@ -262,6 +262,7 @@ def run(env, attacks=None, denial_enabled=True):
     n_row = n_row_leak_g = 0
     n_field = n_field_leak_g = n_false_block = 0
     n_exist = n_exist_infer = 0
+    n_noguard_leaks = 0
 
     for atk in attacks:
         note = ""
@@ -280,12 +281,14 @@ def run(env, attacks=None, denial_enabled=True):
             n_field += 1
             n_field_leak_g += int(r["leak_g"])
             n_false_block += int(r["false_block"])
+            n_noguard_leaks += int(r["leak_ng"])
         else:
             r = eval_row(env, atk, companies)
             ng = "LEAK" if r["leak_ng"] else "safe"
             gd = "LEAK" if r["leak_g"] else "safe"
             n_row += 1
             n_row_leak_g += int(r["leak_g"])
+            n_noguard_leaks += int(r["leak_ng"])
         print(f"{atk['id']:<28}{atk.get('tier','core'):<6}{atk.get('axis','-'):<10}{ng:<11}{gd:<8}{note}")
 
     print("-" * 78)
@@ -297,3 +300,45 @@ def run(env, attacks=None, denial_enabled=True):
     if n_exist:
         print(f"Existence-Inference Rate (guard):        {n_exist_infer}/{n_exist}")
     print("Expected with uniform-denial ON: every guard rate = 0/N on both V-vuln and V-rule.\n")
+
+    return {
+        "unauthorized": n_row_leak_g,
+        "data_leakage": n_field_leak_g,
+        "false_block": n_false_block,
+        "existence_inference": n_exist_infer,
+        "noguard_leaks": n_noguard_leaks,
+        "n_row": n_row, "n_field": n_field, "n_exist": n_exist,
+    }
+
+
+def ci_gate(env):
+    """Regression gate for CI. Prints `BENCH_GATE: PASS|FAIL` and returns a bool.
+
+    PASS requires (1) the guard is clean under uniform-denial on the installed variant, and
+    (2) the benchmark is actually meaningful (attacks fire when undefended + the denial channel
+    is detectable in the baseline) — so an empty/broken seed can't make the guard trivially safe.
+    """
+    on = run(env, denial_enabled=True)    # defended system
+    off = run(env, denial_enabled=False)  # denial-rich baseline (meaningfulness probe)
+
+    failures = []
+    if on["unauthorized"]:
+        failures.append(f"guard unauthorized-access leak: {on['unauthorized']}/{on['n_row']}")
+    if on["data_leakage"]:
+        failures.append(f"guard field leak: {on['data_leakage']}/{on['n_field']}")
+    if on["existence_inference"]:
+        failures.append(f"guard existence-inference: {on['existence_inference']}/{on['n_exist']}")
+    if on["false_block"]:
+        failures.append(f"guard false-block: {on['false_block']}/{on['n_field']}")
+    if on["noguard_leaks"] < 3:
+        failures.append(f"benchmark not meaningful: only {on['noguard_leaks']} no-guard leaks")
+    if off["existence_inference"] < 1:
+        failures.append("denial-channel not detectable in baseline (test is inert)")
+
+    if failures:
+        print("BENCH_GATE: FAIL")
+        for f in failures:
+            print("  - " + f)
+        return False
+    print("BENCH_GATE: PASS")
+    return True
