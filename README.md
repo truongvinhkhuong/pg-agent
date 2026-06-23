@@ -86,15 +86,32 @@ Two schema variants (toggle the data file in `pco_core_mock/__manifest__.py`):
 The guard is **safe on every class in both variants** (variant-independent by design). Exact
 pass/fail is *measured* by the harness, not asserted.
 
-### Verified result (Odoo 19, both variants)
+### Plane comparison — the headline result (Odoo 19, V-vuln; verified)
 
-| attack | no-guard (V-vuln) | no-guard (V-rule) | guard |
+Two baselines vs the PG-Agent PEP. **inherited-RBAC** = native Odoo record rules only
+(Cortex-Analyst-style "inherit governance"); **action-authz** = OAP-style — authorize the
+call (model allow-list + valid params) but do **not** filter result rows.
+
+| attack | inherited-RBAC (native ir.rule) | action-authz (OAP) | PG-Agent (PEP) |
 |---|---|---|---|
-| relational-traversal | LEAK | safe (naive fix patched line) | safe |
-| aggregation-leak (payment) | LEAK | **LEAK** (sibling forgotten) | safe |
-| sensitive-field / measure | LEAK | LEAK | safe |
-| tenant-bypass | LEAK | LEAK | safe |
-| existence-inference | inferable (denial-rich) | — | **indistinguishable** (uniform-denial) |
+| relational-traversal | LEAK | LEAK | **safe** |
+| aggregation-leak | LEAK | LEAK | **safe** |
+| sensitive-field / measure | LEAK | LEAK | **safe** |
+| tenant-bypass | LEAK | LEAK | **safe** |
+
+**N4a/N5:** action-authz *denies a call to a non-whitelisted model* (it enforces the action plane)
+but still **leaks rows of permitted models** — the confused-deputy / BOLA gap; and inheriting native
+governance is incomplete. Only the **data-result-plane** PEP closes case #1.
+
+### Variant + denial-channel results
+
+- **V-rule** (naive line-only fix): inherited-RBAC/action-authz flip to *safe* for the line but
+  `aggregation-leak` (payment) **still leaks** for both — point fixes don't compose. PG-Agent stays safe.
+- **existence-inference**: inferable under inherited-RBAC and under the denial-rich PG-Agent baseline,
+  **indistinguishable** once uniform-denial is on (T2.4) — Existence-Inference Rate 1→0.
+
+Guard rates with uniform-denial ON: Unauthorized-Access 0/4, Data-Leakage 0/2, False-Block 0/2,
+Existence-Inference 0/1.
 
 Guard rates with uniform-denial ON: Unauthorized-Access 0/4, Data-Leakage 0/2, False-Block 0/2,
 Existence-Inference 0/1 (→ 1/1 with the denial-rich baseline). The V-rule column is the

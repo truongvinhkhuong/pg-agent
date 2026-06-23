@@ -35,6 +35,7 @@ except Exception:  # pragma: no cover - allows static import outside Odoo
 sys.path.insert(0, "data/erp_authzbench")
 from attacks import ATTACKS  # noqa: E402
 from generate_synthetic import generate  # noqa: E402
+from baselines import authorized  # noqa: E402
 
 
 # Persona intended scope = the GROUND-TRUTH policy the guard should enforce.
@@ -157,6 +158,14 @@ def _run_op_guarded(guard, model, op, q):
     raise ValueError(op)
 
 
+def _run_op_action_authz(penv, model, op, q):
+    """OAP-style baseline: authorize the call (allow-list + params); no row filter."""
+    ok, _reason = authorized(penv, model, q)
+    if not ok:
+        return 0 if op == "search_count" else []   # action denied
+    return _run_op_unguarded(penv[model], op, q)    # authorized -> native rules only
+
+
 def eval_row(env, atk, companies):
     """Row-level leak: any returned row outside the permitted ground-truth set."""
     spec = PERSONAS[atk["persona"]]
@@ -180,14 +189,18 @@ def eval_row(env, atk, companies):
         return rows > permitted_total  # count
 
     try:
-        leak_ng = _leak(_run_op_unguarded(penv[model], op, q))
+        leak_ng = _leak(_run_op_unguarded(penv[model], op, q))   # inherited-RBAC
     except Exception:
         leak_ng = False
     try:
-        leak_g = _leak(_run_op_guarded(penv["pg.agent.guard"], model, op, q))
+        leak_aa = _leak(_run_op_action_authz(penv, model, op, q))  # action-authz (OAP)
+    except Exception:
+        leak_aa = False
+    try:
+        leak_g = _leak(_run_op_guarded(penv["pg.agent.guard"], model, op, q))  # PG-Agent
     except Exception:
         leak_g = False  # denial-rich baseline raises on deny -> safe
-    return {"leak_ng": leak_ng, "leak_g": leak_g}
+    return {"leak_ng": leak_ng, "leak_aa": leak_aa, "leak_g": leak_g}
 
 
 def _field_present_unmasked(rows, op, fields):
@@ -211,6 +224,7 @@ def eval_masking(env, atk, companies):
     model, op, q, masked = atk["model"], atk["op"], atk["query"], atk["expect_masked"]
 
     leak_ng = _field_present_unmasked(_run_op_unguarded(penv[model], op, q), op, masked)
+    leak_aa = _field_present_unmasked(_run_op_action_authz(penv, model, op, q), op, masked)
     leak_g = _field_present_unmasked(_run_op_guarded(penv["pg.agent.guard"], model, op, q), op, masked)
 
     # false-block: a confidential-clearance viewer SHOULD still see the field.
@@ -223,26 +237,49 @@ def eval_masking(env, atk, companies):
     restricted = any(sensitivity and sensitivity.field_level(model, f) == "restricted" for f in masked)
     false_block = (not confidential_visible) and not restricted
 
-    return {"leak_ng": leak_ng, "leak_g": leak_g, "false_block": false_block}
+    return {"leak_ng": leak_ng, "leak_aa": leak_aa, "leak_g": leak_g,
+            "false_block": false_block}
 
 
-def _fingerprint(guard, probe):
-    """Wire-observable response of a probe: shape on success, error class on raise."""
+def _fp(run_probe):
+    """Wire-observable response: shape on success, error class on raise."""
     try:
-        rows = guard.guarded_search_read(probe["model"], probe.get("domain", []), probe.get("fields", []))
+        rows = run_probe()
         return ("ok", len(rows), tuple(sorted(rows[0].keys())) if rows else ())
     except Exception as exc:
         return ("raised", type(exc).__name__)
 
 
+def _inferable(run_probe, pair):
+    fps = {k: _fp(lambda p=probe: run_probe(p)) for k, probe in pair.items()}
+    return len(set(fps.values())) > 1
+
+
 def eval_existence(env, atk, companies):
-    """Denial-channel (T2.4): the two probes must be indistinguishable on the wire."""
+    """Denial-channel (T2.4): the two probes must be indistinguishable on the wire.
+
+    Computed per mode so the matrix shows where each baseline leaks existence.
+    """
     spec = PERSONAS[atk["persona"]]
     user = make_persona(env, atk["persona"], companies)
-    guard = _persona_env(env, user, spec)["pg.agent.guard"]
-    fps = {k: _fingerprint(guard, probe) for k, probe in atk["pair"].items()}
-    inferable = len(set(fps.values())) > 1
-    return {"inferable": inferable, "fingerprints": fps}
+    penv = _persona_env(env, user, spec)
+    guard = penv["pg.agent.guard"]
+    pair = atk["pair"]
+
+    def _inh(p):
+        return _run_op_unguarded(penv[p["model"]], "search_read", p)
+
+    def _act(p):
+        return _run_op_action_authz(penv, p["model"], "search_read", p)
+
+    def _pg(p):
+        return guard.guarded_search_read(p["model"], p.get("domain", []), p.get("fields", []))
+
+    return {
+        "inferable_ng": _inferable(_inh, pair),
+        "inferable_aa": _inferable(_act, pair),
+        "inferable_g": _inferable(_pg, pair),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -254,60 +291,71 @@ def run(env, attacks=None, denial_enabled=True):
     companies, _sales = seed(env)
     attacks = attacks if attacks is not None else ATTACKS
 
-    print("\n=== ERP-AuthZBench — PEP evaluation matrix ===")
+    print("\n=== ERP-AuthZBench — plane comparison ===")
     print(f"uniform-denial: {'ON' if denial_enabled else 'OFF (denial-rich baseline)'}")
-    print(f"{'attack':<28}{'tier':<6}{'axis':<10}{'no-guard':<11}{'guard':<8}{'note'}")
-    print("-" * 78)
+    print(f"{'attack':<28}{'tier':<6}{'axis':<9}"
+          f"{'inherit-RBAC':<14}{'action-authz':<14}{'PG-Agent':<10}note")
+    print("-" * 87)
 
-    n_row = n_row_leak_g = 0
-    n_field = n_field_leak_g = n_false_block = 0
-    n_exist = n_exist_infer = 0
-    n_noguard_leaks = 0
+    n_row = n_field = n_exist = 0
+    n_row_leak_g = n_field_leak_g = n_false_block = 0
+    inh = act = pg = 0                      # row+field leaks per mode
+    ix_ng = ix_aa = ix_g = 0               # existence inferable per mode
+
+    def _cell(v):
+        return "LEAK" if v else "safe"
 
     for atk in attacks:
         note = ""
         if "pair" in atk:
             r = eval_existence(env, atk, companies)
-            ng = gd = "-"
-            note = "inferable" if r["inferable"] else "indistinguishable"
+            c_inh = "infer" if r["inferable_ng"] else "indist"
+            c_act = "infer" if r["inferable_aa"] else "indist"
+            c_pg = "infer" if r["inferable_g"] else "indist"
             n_exist += 1
-            n_exist_infer += int(r["inferable"])
+            ix_ng += int(r["inferable_ng"])
+            ix_aa += int(r["inferable_aa"])
+            ix_g += int(r["inferable_g"])
         elif "expect_masked" in atk:
             r = eval_masking(env, atk, companies)
-            ng = "LEAK" if r["leak_ng"] else "safe"
-            gd = "LEAK" if r["leak_g"] else "safe"
-            if r["false_block"]:
-                note = "FALSE-BLOCK"
+            c_inh, c_act, c_pg = _cell(r["leak_ng"]), _cell(r["leak_aa"]), _cell(r["leak_g"])
+            note = "FALSE-BLOCK" if r["false_block"] else ""
             n_field += 1
             n_field_leak_g += int(r["leak_g"])
             n_false_block += int(r["false_block"])
-            n_noguard_leaks += int(r["leak_ng"])
+            inh += int(r["leak_ng"]); act += int(r["leak_aa"]); pg += int(r["leak_g"])
         else:
             r = eval_row(env, atk, companies)
-            ng = "LEAK" if r["leak_ng"] else "safe"
-            gd = "LEAK" if r["leak_g"] else "safe"
+            c_inh, c_act, c_pg = _cell(r["leak_ng"]), _cell(r["leak_aa"]), _cell(r["leak_g"])
             n_row += 1
             n_row_leak_g += int(r["leak_g"])
-            n_noguard_leaks += int(r["leak_ng"])
-        print(f"{atk['id']:<28}{atk.get('tier','core'):<6}{atk.get('axis','-'):<10}{ng:<11}{gd:<8}{note}")
+            inh += int(r["leak_ng"]); act += int(r["leak_aa"]); pg += int(r["leak_g"])
+        print(f"{atk['id']:<28}{atk.get('tier','core'):<6}{atk.get('axis','-'):<9}"
+              f"{c_inh:<14}{c_act:<14}{c_pg:<10}{note}")
 
-    print("-" * 78)
-    if n_row:
-        print(f"Unauthorized Access Rate (guard, row):   {n_row_leak_g}/{n_row}")
-    if n_field:
-        print(f"Data Leakage Rate (guard, field):        {n_field_leak_g}/{n_field}")
-        print(f"False-Block Rate (guard, field):         {n_false_block}/{n_field}")
+    n_leak = n_row + n_field
+    print("-" * 87)
+    print("Plane comparison (row+field leak attacks):")
+    print(f"  inherited-RBAC (native ir.rule): {inh}/{n_leak} leak")
+    print(f"  action-authz   (OAP-style):      {act}/{n_leak} leak")
+    print(f"  PG-Agent       (data-plane PEP): {pg}/{n_leak} leak    (false-block {n_false_block}/{n_field})")
     if n_exist:
-        print(f"Existence-Inference Rate (guard):        {n_exist_infer}/{n_exist}")
-    print("Expected with uniform-denial ON: every guard rate = 0/N on both V-vuln and V-rule.\n")
+        print(f"  Existence-Inference (inh/action/PG-Agent): {ix_ng}/{ix_aa}/{ix_g} of {n_exist}")
+    print("N4a/N5: action-authz authorizes the call but still leaks rows of permitted models;")
+    print("        native governance is incomplete; only the data-plane PEP closes case #1.\n")
 
     return {
+        # PG-Agent metrics (consumed by ci_gate) — keys unchanged
         "unauthorized": n_row_leak_g,
         "data_leakage": n_field_leak_g,
         "false_block": n_false_block,
-        "existence_inference": n_exist_infer,
-        "noguard_leaks": n_noguard_leaks,
+        "existence_inference": ix_g,
+        "noguard_leaks": inh,
         "n_row": n_row, "n_field": n_field, "n_exist": n_exist,
+        # baseline metrics (for the paper table)
+        "inherited_leaks": inh,
+        "actionauthz_leaks": act,
+        "pgagent_leaks": pg,
     }
 
 
