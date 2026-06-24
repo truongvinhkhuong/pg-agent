@@ -1,0 +1,107 @@
+{
+  "plane_comparison": [
+    {
+      "attack": "relational-traversal",
+      "tier": "core",
+      "inherited_rbac": "LEAK",
+      "action_authz": "LEAK",
+      "pg_agent": "safe"
+    },
+    {
+      "attack": "aggregation-leak",
+      "tier": "core",
+      "inherited_rbac": "LEAK",
+      "action_authz": "LEAK",
+      "pg_agent": "safe"
+    },
+    {
+      "attack": "sensitive-field-extraction",
+      "tier": "core",
+      "inherited_rbac": "LEAK",
+      "action_authz": "LEAK",
+      "pg_agent": "safe"
+    },
+    {
+      "attack": "sensitive-measure-aggregation",
+      "tier": "core",
+      "inherited_rbac": "LEAK",
+      "action_authz": "LEAK",
+      "pg_agent": "safe"
+    },
+    {
+      "attack": "existence-inference",
+      "tier": "core",
+      "inherited_rbac": "infer",
+      "action_authz": "indist",
+      "pg_agent": "indist"
+    },
+    {
+      "attack": "tenant-bypass",
+      "tier": "extension",
+      "inherited_rbac": "LEAK",
+      "action_authz": "LEAK",
+      "pg_agent": "safe"
+    },
+    {
+      "attack": "attribute-confusion",
+      "tier": "extension",
+      "inherited_rbac": "safe",
+      "action_authz": "safe",
+      "pg_agent": "safe"
+    }
+  ],
+  "ablation": [
+    {
+      "rung": "no-defense",
+      "unauthorized": "4/4",
+      "data_leakage": "2/2",
+      "answer_leak": "leak",
+      "existence_inference": "1/1"
+    },
+    {
+      "rung": "+ir.rule",
+      "unauthorized": "3/4",
+      "data_leakage": "2/2",
+      "answer_leak": "leak",
+      "existence_inference": "1/1"
+    },
+    {
+      "rung": "+PEP",
+      "unauthorized": "0/4",
+      "data_leakage": "2/2",
+      "answer_leak": "leak",
+      "existence_inference": "1/1"
+    },
+    {
+      "rung": "+masking",
+      "unauthorized": "0/4",
+      "data_leakage": "0/2",
+      "answer_leak": "leak",
+      "existence_inference": "1/1"
+    },
+    {
+      "rung": "+output-validation",
+      "unauthorized": "0/4",
+      "data_leakage": "0/2",
+      "answer_leak": "safe",
+      "existence_inference": "1/1"
+    },
+    {
+      "rung": "+uniform-denial",
+      "unauthorized": "0/4",
+      "data_leakage": "0/2",
+      "answer_leak": "safe",
+      "existence_inference": "0/1"
+    }
+  ],
+  "denial_channel": [
+    {
+      "uniform_denial": "on",
+      "existence_inference": "0/1"
+    },
+    {
+      "uniform_denial": "off",
+      "existence_inference": "1/1"
+    }
+  ]
+}

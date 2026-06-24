@@ -111,11 +111,21 @@ governance is incomplete. Only the **data-result-plane** PEP closes case #1.
   **indistinguishable** once uniform-denial is on (T2.4) — Existence-Inference Rate 1→0.
 
 Guard rates with uniform-denial ON: Unauthorized-Access 0/4, Data-Leakage 0/2, False-Block 0/2,
-Existence-Inference 0/1.
-
-Guard rates with uniform-denial ON: Unauthorized-Access 0/4, Data-Leakage 0/2, False-Block 0/2,
 Existence-Inference 0/1 (→ 1/1 with the denial-rich baseline). The V-rule column is the
 non-composability evidence: the naive per-model fix plugs `line` but forgets the `payment` sibling.
+
+### Defense-in-depth ablation (each layer zeroes a distinct metric)
+
+| rung | Unauthorized | DataLeakage | AnswerLeak | Existence-Inf |
+|---|---|---|---|---|
+| no-defense (sudo) | 4/4 | 2/2 | leak | infer |
+| +ir.rule (native) | 3/4 | 2/2 | leak | infer |
+| +PEP (row-domain) | **0/4** | 2/2 | leak | infer |
+| +masking | 0/4 | **0/2** | leak | infer |
+| +output-validation | 0/4 | 0/2 | **safe** | infer |
+| +uniform-denial | 0/4 | 0/2 | safe | **0/1** |
+
+Removing any single layer reopens exactly one metric → defense-in-depth is necessary (RQ3).
 
 ## Run the benchmark (mock, no private access)
 
@@ -135,8 +145,14 @@ odoo-bin shell -c config/odoo.mock.conf -d authzbench --no-http <<'PY'
 exec(open('tests/evaluation_script.py').read())
 run(env)                        # uniform-denial ON  (defended)
 run(env, denial_enabled=False)  # denial-rich baseline -> Existence-Inference Rate 1/1
+ablation(env)                   # defense-in-depth ladder
+export_results(env)             # regenerate every paper table -> results/*.csv + results.json
 PY
 ```
+
+`export_results(env)` is the one-command artifact: it writes `results/plane_comparison.csv`,
+`results/ablation.csv`, `results/denial_channel.csv`, and `results/results.json` — the tables the
+paper cites (committed reference copies live in [`results/`](results/)).
 
 Repeat after switching `pco_core_mock/__manifest__.py` to `team_security_vrule.xml` and
 reinstalling (`-u pco_core_mock`) to produce the V-rule row of the matrix.

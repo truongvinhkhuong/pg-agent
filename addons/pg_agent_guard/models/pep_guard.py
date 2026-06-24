@@ -37,6 +37,11 @@ from . import sensitivity
 # Uniform redaction sentinel for masked field values (T2.2).
 MASK_SENTINEL = "***"
 
+# Ablation toggle for the benchmark's defense-in-depth ladder. Production keeps this
+# True; the harness flips it off to measure masking's marginal contribution. (Uniform
+# denial has its own toggle in services/denial.DENIAL_CONFIG.)
+GUARD_CONFIG = {"enforce_masking": True}
+
 # Per-model authorization policy. Paths use ONLY contract-surface fields that are
 # guaranteed present in both the public mock and the real private pco_core.
 POLICY = {
@@ -99,6 +104,8 @@ class PgAgentGuard(models.AbstractModel):
         `id` is always kept (not business-sensitive). Relational (id, name) tuples
         are redacted whole. Returns the set of field names that were masked.
         """
+        if not GUARD_CONFIG.get("enforce_masking"):
+            return set()
         masked = set()
         for row in rows:
             # reassigning existing keys during iteration is safe (dict size unchanged)
@@ -208,33 +215,33 @@ class PgAgentGuard(models.AbstractModel):
         if not dec.allowed:
             return self._deny("read_group", t0)
 
-        clearance = self._user_clearance()
         groupby = groupby or []
         fields = fields or []
+        allowed_fields, masked = fields, set()
 
-        # A group-key above clearance would leak its distinct values as group labels
-        # even if every measure is masked -> deny the whole aggregation (uniform).
-        for g in groupby:
-            base = g.split(":")[0]
-            if not sensitivity.can_see(clearance, sensitivity.field_level(model, base)):
-                audit_decision(
-                    self.env, model, "read_group", dec.domain, allowed=False,
-                    reason="masking: groupby field above clearance",
-                    masked_fields=[base],
-                    denial_uniformized=bool(denial.DENIAL_CONFIG.get("enabled")),
-                )
-                return self._deny("read_group", t0)
-
-        # Drop above-clearance measures BEFORE aggregating — never compute/materialize
-        # a confidential aggregate. (Masking by zeroing would be a wrong number AND a
-        # masked-vs-genuinely-zero side-channel.)
-        allowed_fields, masked = [], set()
-        for f in fields:
-            base = f.split(":")[0]
-            if sensitivity.can_see(clearance, sensitivity.field_level(model, base)):
-                allowed_fields.append(f)
-            else:
-                masked.add(base)
+        if GUARD_CONFIG.get("enforce_masking"):
+            clearance = self._user_clearance()
+            # A group-key above clearance would leak its distinct values as group labels
+            # even if every measure is masked -> deny the whole aggregation (uniform).
+            for g in groupby:
+                base = g.split(":")[0]
+                if not sensitivity.can_see(clearance, sensitivity.field_level(model, base)):
+                    audit_decision(
+                        self.env, model, "read_group", dec.domain, allowed=False,
+                        reason="masking: groupby field above clearance",
+                        masked_fields=[base],
+                        denial_uniformized=bool(denial.DENIAL_CONFIG.get("enabled")),
+                    )
+                    return self._deny("read_group", t0)
+            # Drop above-clearance measures BEFORE aggregating — never materialize a
+            # confidential aggregate.
+            allowed_fields, masked = [], set()
+            for f in fields:
+                base = f.split(":")[0]
+                if sensitivity.can_see(clearance, sensitivity.field_level(model, base)):
+                    allowed_fields.append(f)
+                else:
+                    masked.add(base)
 
         rows = self.env[model].read_group(
             dec.domain, allowed_fields, groupby,

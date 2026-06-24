@@ -1,0 +1,8 @@
+attack,tier,inherited_rbac,action_authz,pg_agent
+relational-traversal,core,LEAK,LEAK,safe
+aggregation-leak,core,LEAK,LEAK,safe
+sensitive-field-extraction,core,LEAK,LEAK,safe
+sensitive-measure-aggregation,core,LEAK,LEAK,safe
+existence-inference,core,infer,indist,indist
+tenant-bypass,extension,LEAK,LEAK,safe
+attribute-confusion,extension,safe,safe,safe

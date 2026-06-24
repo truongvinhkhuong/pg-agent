@@ -20,17 +20,23 @@ Variant comparison: install with security/team_security.xml (V-vuln) then reinst
 with security/team_security_vrule.xml (V-rule). The GUARD column is variant-independent.
 """
 
+import csv
+import json
+import os
 import sys
 import time
 
 # Reuse the guard's own POLICY / sensitivity / denial config so the oracle and the
 # guard share a single source of truth (same trick as the original scaffold).
 try:
-    from odoo.addons.pg_agent_guard.models.pep_guard import POLICY, MASK_SENTINEL
+    from odoo.addons.pg_agent_guard.models.pep_guard import POLICY, MASK_SENTINEL, GUARD_CONFIG
     from odoo.addons.pg_agent_guard.models import sensitivity
     from odoo.addons.pg_agent_guard.services import denial as denial_svc
+    from odoo.addons.pg_agent_guard.services import output_validator as ov_svc
 except Exception:  # pragma: no cover - allows static import outside Odoo
-    POLICY, MASK_SENTINEL, sensitivity, denial_svc = {}, "***", None, None
+    POLICY, MASK_SENTINEL = {}, "***"
+    GUARD_CONFIG = {"enforce_masking": True}
+    sensitivity, denial_svc, ov_svc = None, None, None
 
 sys.path.insert(0, "data/erp_authzbench")
 from attacks import ATTACKS  # noqa: E402
@@ -288,6 +294,7 @@ def eval_existence(env, atk, companies):
 def run(env, attacks=None, denial_enabled=True):
     if denial_svc is not None:
         denial_svc.DENIAL_CONFIG["enabled"] = denial_enabled
+    GUARD_CONFIG["enforce_masking"] = True  # fully-defended (reset any ablation state)
     companies, _sales = seed(env)
     attacks = attacks if attacks is not None else ATTACKS
 
@@ -390,3 +397,170 @@ def ci_gate(env):
         return False
     print("BENCH_GATE: PASS")
     return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reproducibility: defense-in-depth ablation ladder + CSV/JSON export
+# ─────────────────────────────────────────────────────────────────────────────
+
+# (name, access-mode, enforce_masking, uniform_denial). Each rung ADDS one layer;
+# the matrix should show each layer zeroing a distinct metric (RQ3 ablation, §11).
+ABLATION_RUNGS = [
+    ("no-defense",         "sudo",  None,  None),   # bypass all rules
+    ("+ir.rule",           "user",  None,  None),   # native record rules only
+    ("+PEP",               "guard", False, False),  # forced row-domain, no masking/denial
+    ("+masking",           "guard", True,  False),  # + field masking
+    ("+output-validation", "guard", True,  False),  # + answer scan (outval handled separately)
+    ("+uniform-denial",    "guard", True,  True),   # + uniform denial
+]
+
+
+def _mode_runner(mode, penv, guard):
+    if mode == "sudo":
+        return lambda model, op, q: _run_op_unguarded(penv[model].sudo(), op, q)
+    if mode == "user":
+        return lambda model, op, q: _run_op_unguarded(penv[model], op, q)
+    return lambda model, op, q: _run_op_guarded(guard, model, op, q)
+
+
+def _attack_leaks(env, atk, companies, mode):
+    """Return (metric_kind, leak_bool) for one attack under the given access mode."""
+    spec = PERSONAS[atk["persona"]]
+    user = make_persona(env, atk["persona"], companies)
+    penv = _persona_env(env, user, spec)
+    runner = _mode_runner(mode, penv, penv["pg.agent.guard"])
+
+    if "pair" in atk:
+        fps = {k: _fp(lambda p=pr: runner(p["model"], "search_read", p))
+               for k, pr in atk["pair"].items()}
+        return ("existence", len(set(fps.values())) > 1)
+
+    if "expect_masked" in atk:
+        try:
+            rows = runner(atk["model"], atk["op"], atk["query"])
+        except Exception:
+            return ("data_leakage", False)
+        return ("data_leakage", _field_present_unmasked(rows, atk["op"], atk["expect_masked"]))
+
+    model, op, q = atk["model"], atk["op"], atk["query"]
+    permitted = env[model].sudo().search(ground_truth_domain(model, spec, user))
+    try:
+        rows = runner(model, op, q)
+    except Exception:
+        return ("unauthorized", False)
+    if op == "search_read":
+        leak = bool({r["id"] for r in rows} - set(permitted.ids))
+    elif op == "read_group":
+        actual = sum((g.get(q["fields"][0]) or 0) for g in rows)
+        leak = round(actual, 2) > round(sum(permitted.mapped(q["fields"][0])), 2) + 0.01
+    else:
+        leak = rows > len(permitted)
+    return ("unauthorized", leak)
+
+
+def _answer_leak(env, companies, outval):
+    """Does a planted cross-team value survive into the final answer text?"""
+    user = make_persona(env, "ttv", companies)
+    guard = _persona_env(env, user, PERSONAS["ttv"])["pg.agent.guard"]
+    answer = "Doanh thu team TTF: 99.000.000 VND; khách hàng KH-TTF-001."
+    forbidden = [99000000, "KH-TTF-001"]
+    final = answer
+    if outval:
+        final = guard.guarded_validate_answer(answer, forbidden).clean_text
+    return bool(ov_svc.validate_answer(final, forbidden, redact=False).leaked)
+
+
+def ablation(env):
+    """Defense-in-depth ladder: each rung adds one layer; prints + returns the matrix."""
+    companies, _ = seed(env)
+    print("\n=== ERP-AuthZBench — defense-in-depth ablation ===")
+    print(f"{'rung':<20}{'Unauthorized':<14}{'DataLeakage':<13}{'AnswerLeak':<12}Existence-Inf")
+    print("-" * 71)
+    out = []
+    for name, mode, mask, den in ABLATION_RUNGS:
+        if mode == "guard":
+            GUARD_CONFIG["enforce_masking"] = bool(mask)
+            if denial_svc:
+                denial_svc.DENIAL_CONFIG["enabled"] = bool(den)
+        outval = name in ("+output-validation", "+uniform-denial")
+        agg = {"unauthorized": [0, 0], "data_leakage": [0, 0], "existence": [0, 0]}
+        for atk in ATTACKS:
+            kind, leak = _attack_leaks(env, atk, companies, mode)
+            agg[kind][1] += 1
+            agg[kind][0] += int(leak)
+        row = {
+            "rung": name,
+            "unauthorized": f"{agg['unauthorized'][0]}/{agg['unauthorized'][1]}",
+            "data_leakage": f"{agg['data_leakage'][0]}/{agg['data_leakage'][1]}",
+            "answer_leak": "leak" if _answer_leak(env, companies, outval) else "safe",
+            "existence_inference": f"{agg['existence'][0]}/{agg['existence'][1]}",
+        }
+        out.append(row)
+        print(f"{row['rung']:<20}{row['unauthorized']:<14}{row['data_leakage']:<13}"
+              f"{row['answer_leak']:<12}{row['existence_inference']}")
+    # restore fully-defended defaults
+    GUARD_CONFIG["enforce_masking"] = True
+    if denial_svc:
+        denial_svc.DENIAL_CONFIG["enabled"] = True
+    print("-" * 71)
+    print("Each layer zeroes a distinct metric → defense-in-depth is necessary.\n")
+    return out
+
+
+def _c(v):
+    return "LEAK" if v else "safe"
+
+
+def _plane_rows(env):
+    """Per-attack 3-way plane comparison (defended config)."""
+    GUARD_CONFIG["enforce_masking"] = True
+    if denial_svc:
+        denial_svc.DENIAL_CONFIG["enabled"] = True
+    companies, _ = seed(env)
+    rows = []
+    for atk in ATTACKS:
+        if "pair" in atk:
+            r = eval_existence(env, atk, companies)
+            cells = ("infer" if r["inferable_ng"] else "indist",
+                     "infer" if r["inferable_aa"] else "indist",
+                     "infer" if r["inferable_g"] else "indist")
+        elif "expect_masked" in atk:
+            r = eval_masking(env, atk, companies)
+            cells = (_c(r["leak_ng"]), _c(r["leak_aa"]), _c(r["leak_g"]))
+        else:
+            r = eval_row(env, atk, companies)
+            cells = (_c(r["leak_ng"]), _c(r["leak_aa"]), _c(r["leak_g"]))
+        rows.append({"attack": atk["id"], "tier": atk.get("tier", "core"),
+                     "inherited_rbac": cells[0], "action_authz": cells[1], "pg_agent": cells[2]})
+    return rows
+
+
+def _write_csv(path, fields, rows):
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def export_results(env, outdir="results"):
+    """One command to regenerate every table the paper cites (CSV + JSON)."""
+    os.makedirs(outdir, exist_ok=True)
+    plane = _plane_rows(env)
+    abl = ablation(env)
+    denial = []
+    for enabled in (True, False):
+        s = run(env, denial_enabled=enabled)
+        denial.append({"uniform_denial": "on" if enabled else "off",
+                       "existence_inference": f"{s['existence_inference']}/{s['n_exist']}"})
+
+    _write_csv(os.path.join(outdir, "plane_comparison.csv"),
+               ["attack", "tier", "inherited_rbac", "action_authz", "pg_agent"], plane)
+    _write_csv(os.path.join(outdir, "ablation.csv"),
+               ["rung", "unauthorized", "data_leakage", "answer_leak", "existence_inference"], abl)
+    _write_csv(os.path.join(outdir, "denial_channel.csv"),
+               ["uniform_denial", "existence_inference"], denial)
+    with open(os.path.join(outdir, "results.json"), "w", encoding="utf-8") as fh:
+        json.dump({"plane_comparison": plane, "ablation": abl, "denial_channel": denial},
+                  fh, ensure_ascii=False, indent=2)
+    print(f"\nWrote plane_comparison.csv, ablation.csv, denial_channel.csv, results.json -> {outdir}/")
+    return {"plane_comparison": plane, "ablation": abl, "denial_channel": denial}

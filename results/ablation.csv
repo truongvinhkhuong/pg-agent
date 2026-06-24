@@ -1,0 +1,7 @@
+rung,unauthorized,data_leakage,answer_leak,existence_inference
+no-defense,4/4,2/2,leak,1/1
++ir.rule,3/4,2/2,leak,1/1
++PEP,0/4,2/2,leak,1/1
++masking,0/4,0/2,leak,1/1
++output-validation,0/4,0/2,safe,1/1
++uniform-denial,0/4,0/2,safe,0/1
