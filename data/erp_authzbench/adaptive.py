@@ -114,45 +114,47 @@ ADAPTIVE = [
         "vector": "mixed-groupby", "in_scope": True,
         "persona": "ttv", "model": "pco.sale.order.line", "op": "read_group",
         "query": {"domain": [], "fields": ["quantity"],
-                  "groupby": ["product_name", "customer_name"]},
+                  "groupby": ["customer_name", "product_name"]},
         "expect_masked": ["customer_name"],
-        "desc": "Allowed groupby (product_name) + confidential groupby (customer_name): one "
-                "above-clearance key denies the whole call.",
+        "desc": "Mixed groupby with a confidential key (customer_name) alongside an allowed one: "
+                "one above-clearance key denies the whole call. The confidential key is placed "
+                "first so lazy read_group materializes it (a trailing key is not realized).",
     },
 
-    # ── FAMILY: existence-pivot — extra denial-channel probe pairs ────────────
-    # Each pair = (out-of-scope-but-EXISTS) vs (genuinely-empty). Under uniform-denial
-    # both legs must look identical on the wire. The payment pair anchors meaningfulness
-    # (child model has no header rule -> the out-of-scope leg fires undefended); the order
-    # pair is non-firing undefended because the header rule already hides it (kept for
-    # completeness / non-composability narrative).
+    # ── FAMILY: existence-pivot — denial-channel via fail-closed on denied models ─
+    # Each pair = (a DENIED model that EXISTS) vs (an allowed model, genuinely empty).
+    # Undefended the denied model returns rows (or an AccessError) while the empty query
+    # returns [] -> the two are distinguishable -> an attacker infers existence. Under the
+    # PEP with uniform-denial ON, a model not in POLICY fails closed to [] -> both legs look
+    # identical -> indistinguishable. We pivot across DIFFERENT denied models (res.users,
+    # res.company) to show the fail-closed/uniform-denial behaviour is not specific to the
+    # canonical res.partner case. (Probing a child by its parent's team does NOT work as an
+    # existence oracle: the join pulls in the header ir.rule, which already hides it.)
     {
-        "id": "adpt-exist-payment", "family": "existence-pivot",
-        "vector": "denied-vs-empty-payment", "in_scope": True,
+        "id": "adpt-exist-denied-users", "family": "existence-pivot",
+        "vector": "denied-model-users", "in_scope": True,
         "persona": "ttv", "op": "search_read",
         "pair": {
-            "out_of_scope": {"model": "pco.sale.order.payment",
-                             "domain": [["order_id.team_code", "=", "ttf"]],
-                             "fields": ["payment_type"]},
-            "genuine_empty": {"model": "pco.sale.order.payment",
-                              "domain": [["order_id.team_code", "=", "zzz_none"]],
-                              "fields": ["payment_type"]},
+            "denied_model": {"model": "res.users",
+                             "domain": [["id", ">", 0]], "fields": ["login"]},
+            "genuine_empty": {"model": "pco.sale.order",
+                              "domain": [["name", "=", "SO-NONE-EXIST-A"]], "fields": ["name"]},
         },
-        "desc": "Out-of-team-but-existing payment probe vs genuinely-empty -> uniform denial "
-                "must make them indistinguishable.",
+        "desc": "Probe a denied model (res.users, not in POLICY) vs an allowed-but-empty query "
+                "-> uniform denial / fail-closed must make them indistinguishable.",
     },
     {
-        "id": "adpt-exist-crossteam", "family": "existence-pivot",
-        "vector": "crossteam-vs-empty-order", "in_scope": True,
+        "id": "adpt-exist-denied-company", "family": "existence-pivot",
+        "vector": "denied-model-company", "in_scope": True,
         "persona": "ttv", "op": "search_read",
         "pair": {
-            "out_of_scope": {"model": "pco.sale.order",
-                             "domain": [["team_code", "=", "ttf"]], "fields": ["name"]},
+            "denied_model": {"model": "res.company",
+                             "domain": [["id", ">", 0]], "fields": ["name"]},
             "genuine_empty": {"model": "pco.sale.order",
-                              "domain": [["team_code", "=", "zzz_none"]], "fields": ["name"]},
+                              "domain": [["name", "=", "SO-NONE-EXIST-B"]], "fields": ["name"]},
         },
-        "desc": "Existence of TTF orders vs empty — header rule already hides this undefended "
-                "(non-firing); guard keeps it indistinguishable.",
+        "desc": "Second denied model (res.company) — fail-closed/uniform-denial is not specific "
+                "to the canonical res.partner probe.",
     },
 
     # ── FAMILY: answer-channel-paraphrase — DOCUMENTED RESIDUAL (in_scope=False) ─

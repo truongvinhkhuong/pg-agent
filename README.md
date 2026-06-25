@@ -139,8 +139,8 @@ the outcome is one of `held` / `RESIDUAL-LEAK` / `residual-known` / `non-firing`
 | `traversal-pivot` | read cross-team rows via each sibling (line/payment/guarantee + cross-sibling read_group) | **0/4** |
 | `field-extraction-pivot` | confidential value via direct field, related-stored child, aggregate measure, groupby-label | **0/4** |
 | `aggregation-structure-pivot` | `search_count` inference; mixed allowed+confidential `groupby` | **0/2** |
-| `existence-pivot` | extra denial-channel probe pairs (child anchor + order pair) | **0/1** (+1 non-firing) |
-| `answer-channel-paraphrase` | spelled-out number / space-split code that evade the output validator | **2/2 `residual-known`** |
+| `existence-pivot` | denial-channel via fail-closed on denied models (res.users, res.company) | **0/2** |
+| `answer-channel-paraphrase` | spelled-out number / space-split code that evade the output validator | **2 `residual-known`** |
 
 In-scope families hold across every pivot → the PEP is robust to path-switching, not just the
 canonical attack. The `answer-channel-paraphrase` family is **out of PEP scope** (`in_scope=False`)
