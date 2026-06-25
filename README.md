@@ -45,11 +45,15 @@ pg-agent/
 ├── data/erp_authzbench/
 │   ├── generate_synthetic.py       # deterministic synthetic generator (no real data)
 │   ├── attacks.py                  # core suite (v3.1) + tagged extensions
+│   ├── adaptive.py                 # T4.5 adaptive-probing variant suite
+│   ├── policy_closure.py           # F10 PoC: pure closure-derivation core (no Odoo)
 │   └── attacks_experimental.py     # ungrounded generality demos (ownership-bypass)
 ├── tests/
 │   ├── evaluation_script.py        # benchmark harness -> environment × attack matrix + metrics
+│   ├── policy_linter.py            # F10 PoC: policy-closure differential linter (lint/lint_gate)
 │   ├── test_output_validator.py    # offline pytest (no Odoo)
-│   └── test_sensitivity_registry.py  # offline pytest (no Odoo)
+│   ├── test_sensitivity_registry.py  # offline pytest (no Odoo)
+│   └── test_policy_closure.py      # offline pytest — closure-derivation core (no Odoo)
 ├── config/
 │   ├── odoo.mock.conf              # PUBLIC mode (no private path)
 │   └── odoo.prod.conf              # PRIVATE/validation mode
@@ -183,6 +187,31 @@ PY
 `results/ablation.csv`, `results/adaptive_probing.csv`, `results/denial_channel.csv`, and
 `results/results.json` — the tables the paper cites (committed reference copies live in
 [`results/`](results/)).
+
+### Policy-closure differential linter (F10 PoC)
+
+The guard's `POLICY` row-level closures are hand-written today. [`tests/policy_linter.py`](tests/policy_linter.py)
+is the de-risking PoC for **F10** (an ERP Policy-Closure Compiler): it reads the ORM relation graph
+(`ir.model.fields`) + existing `ir.rule`s, then for each `(model, axis)` decides
+`GOVERNED` / `GAP` / `ROOT-UNGOVERNED` and **derives** the closure path that would fix a gap — confirming
+each gap with a runtime differential test (child-direct vs closure-allowed rows as a restricted persona).
+
+```bash
+odoo-bin shell -c config/odoo.mock.conf -d authzbench --no-http <<'PY'
+exec(open('tests/evaluation_script.py').read())   # harness globals (seed/personas/_write_csv)
+exec(open('tests/policy_linter.py').read())
+lint(env)        # -> results/policy_lint.csv  (re-run V-rule with outdir="results/vrule")
+lint_gate(env)   # report-only: PASS unless a team GAP is un-POLICY'd or a path != POLICY
+PY
+```
+
+Two payoffs it demonstrates on the mock: (1) the derived team/company paths **reproduce the hand-written
+`POLICY`** (`matches_policy` column — a soundness check); (2) on **V-rule** it auto-flags the
+`payment`/`guarantee` team `GAP` the naive line-only fix forgot (the static `GAP` verdict and the runtime
+`LEAK` agree). The pure derivation core ([`data/erp_authzbench/policy_closure.py`](data/erp_authzbench/policy_closure.py))
+is offline-unit-tested by `tests/test_policy_closure.py`. Company axis comes back `ROOT-UNGOVERNED` on every
+model — no native company rule exists anywhere (the tenant-bypass vector). Committed reference copies:
+[`results/policy_lint.csv`](results/policy_lint.csv) (V-vuln) and [`results/vrule/policy_lint.csv`](results/vrule/policy_lint.csv).
 
 Repeat after switching `pco_core_mock/__manifest__.py` to `team_security_vrule.xml` and
 reinstalling (`-u pco_core_mock`) to produce the V-rule row of the matrix —

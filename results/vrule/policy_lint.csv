@@ -1,0 +1,9 @@
+model,axis,relation_path,hops,native_rule,parent_governed,verdict,derived_closure,differential_leak,matches_policy
+pco.sale.order,company,company_id,0,False,False,ROOT-UNGOVERNED,,,True
+pco.sale.order,team,team_code,0,True,True,GOVERNED,,safe,True
+pco.sale.order.guarantee,company,order_id.company_id,1,False,False,ROOT-UNGOVERNED,,,True
+pco.sale.order.guarantee,team,order_id.team_code,1,False,True,GAP,order_id.team_code,LEAK,True
+pco.sale.order.line,company,order_id.company_id,1,False,False,ROOT-UNGOVERNED,,,True
+pco.sale.order.line,team,order_id.team_code,1,True,True,GOVERNED,,safe,True
+pco.sale.order.payment,company,order_id.company_id,1,False,False,ROOT-UNGOVERNED,,,True
+pco.sale.order.payment,team,order_id.team_code,1,False,True,GAP,order_id.team_code,LEAK,True
