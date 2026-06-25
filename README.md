@@ -127,6 +127,28 @@ non-composability evidence: the naive per-model fix plugs `line` but forgets the
 
 Removing any single layer reopens exactly one metric → defense-in-depth is necessary (RQ3).
 
+### Adaptive probing — residual authorization risk (T4.5)
+
+Beyond the canonical attack of each class, [`adaptive`](data/erp_authzbench/adaptive.py) runs
+*families of semantically-equivalent variants* that pursue one goal through different ORM paths
+(pivots). Each variant is run **undefended** (must actually fire — meaningfulness) and **defended**;
+the outcome is one of `held` / `RESIDUAL-LEAK` / `residual-known` / `non-firing`.
+
+| family | pivots | residual-leak / fired |
+|---|---|---|
+| `traversal-pivot` | read cross-team rows via each sibling (line/payment/guarantee + cross-sibling read_group) | **0/4** |
+| `field-extraction-pivot` | confidential value via direct field, related-stored child, aggregate measure, groupby-label | **0/4** |
+| `aggregation-structure-pivot` | `search_count` inference; mixed allowed+confidential `groupby` | **0/2** |
+| `existence-pivot` | extra denial-channel probe pairs (child anchor + order pair) | **0/1** (+1 non-firing) |
+| `answer-channel-paraphrase` | spelled-out number / space-split code that evade the output validator | **2/2 `residual-known`** |
+
+In-scope families hold across every pivot → the PEP is robust to path-switching, not just the
+canonical attack. The `answer-channel-paraphrase` family is **out of PEP scope** (`in_scope=False`)
+and reports a *real* output-validator limit — measured by an independent ground-truth oracle, not by
+the validator under test — so it is **documented, not hidden** ("report truthfully, don't claim
+eliminated"). The integrity half of T4.5 (wrong-number variants) is deferred — blocked-on the
+integrity test set (T4.3) and numeric verifier (TB.1), which are not part of this artifact yet.
+
 ## Run the benchmark (mock, no private access)
 
 ```bash
@@ -146,13 +168,15 @@ exec(open('tests/evaluation_script.py').read())
 run(env)                        # uniform-denial ON  (defended)
 run(env, denial_enabled=False)  # denial-rich baseline -> Existence-Inference Rate 1/1
 ablation(env)                   # defense-in-depth ladder
+adaptive(env)                   # adaptive probing -> residual-risk per family (T4.5)
 export_results(env)             # regenerate every paper table -> results/*.csv + results.json
 PY
 ```
 
 `export_results(env)` is the one-command artifact: it writes `results/plane_comparison.csv`,
-`results/ablation.csv`, `results/denial_channel.csv`, and `results/results.json` — the tables the
-paper cites (committed reference copies live in [`results/`](results/)).
+`results/ablation.csv`, `results/adaptive_probing.csv`, `results/denial_channel.csv`, and
+`results/results.json` — the tables the paper cites (committed reference copies live in
+[`results/`](results/)).
 
 Repeat after switching `pco_core_mock/__manifest__.py` to `team_security_vrule.xml` and
 reinstalling (`-u pco_core_mock`) to produce the V-rule row of the matrix.
@@ -168,9 +192,11 @@ On Google Colab: `scripts/colab_bootstrap.py` → `public_path()` (no token need
   run via `pre-commit`). A new secret or invoice-like blob turns CI red.
 - **`authzbench`** — installs `pco_core_mock` + `pg_agent_guard` in **Odoo 19** (+ Postgres) and runs
   `ci_gate(env)` over **both schema variants** (V-vuln and V-rule). It fails unless the guard is
-  clean (Unauthorized-Access = Data-Leakage = Existence-Inference = False-Block = 0) **and** the
-  benchmark is meaningful (attacks actually fire when undefended). This is the regression gate: any
-  change that reopens a leak turns CI red.
+  clean (Unauthorized-Access = Data-Leakage = Existence-Inference = False-Block = 0), **no in-scope
+  adaptive pivot survives the guard** (T4.5 residual-risk = 0; `residual-known` / `non-firing` never
+  fail the gate), **and** the benchmark is meaningful (canonical attacks and adaptive pivots actually
+  fire when undefended). This is the regression gate: any change that reopens a leak — on the
+  canonical path **or** any pivot path — turns CI red.
 
 ## Anti-leak
 
