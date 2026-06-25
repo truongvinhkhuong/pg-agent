@@ -114,6 +114,12 @@ Guard rates with uniform-denial ON: Unauthorized-Access 0/4, Data-Leakage 0/2, F
 Existence-Inference 0/1 (→ 1/1 with the denial-rich baseline). The V-rule column is the
 non-composability evidence: the naive per-model fix plugs `line` but forgets the `payment` sibling.
 
+Committed reference copies of the **full V-rule matrix** live in [`results/vrule/`](results/vrule/)
+(V-vuln stays in [`results/`](results/)). The V-rule plane table differs from V-vuln by a **single
+row** — `relational-traversal` flips to `safe,safe` while `aggregation-leak` stays `LEAK,LEAK` — and
+adaptive `adpt-trav-line*` go `non-firing` while the `payment`/`guarantee` sibling pivots stay
+`held`: the same non-composability at the pivot level. PG-Agent is `safe`/`held` in both variants.
+
 ### Defense-in-depth ablation (each layer zeroes a distinct metric)
 
 | rung | Unauthorized | DataLeakage | AnswerLeak | Existence-Inf |
@@ -179,7 +185,9 @@ PY
 [`results/`](results/)).
 
 Repeat after switching `pco_core_mock/__manifest__.py` to `team_security_vrule.xml` and
-reinstalling (`-u pco_core_mock`) to produce the V-rule row of the matrix.
+reinstalling (`-u pco_core_mock`) to produce the V-rule row of the matrix —
+`export_results(env, outdir="results/vrule")` writes it alongside the V-vuln copies
+(committed reference copies live in [`results/vrule/`](results/vrule/)).
 
 On Google Colab: `scripts/colab_bootstrap.py` → `public_path()` (no token needed).
 
