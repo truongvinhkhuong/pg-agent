@@ -8,8 +8,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "data", "erp_authzbench"))
-from policy_closure import derive_gaps      # noqa: E402
-from domain_ast import parse_domain         # noqa: E402
+from policy_closure import derive_gaps                      # noqa: E402
+from domain_ast import parse_domain, governance_fields      # noqa: E402
 
 # ── Fixtures: the pco mock as a field-keyed multi-definer graph ──────────────
 PCO_MODELS = ["pco.sale.order", "pco.sale.order.line",
@@ -140,6 +140,58 @@ def test_parse_global_rule_has_no_field():
 def test_parse_unparseable_never_raises():
     fields, simple, reason = parse_domain("[('a','=',1)")   # missing closing bracket
     assert fields == set() and simple is False and reason == "unparseable"
+
+
+# ── governance_fields (context-bound discriminator extractor, F10 Increment 1b) ──
+def test_gf_context_vs_literal():
+    assert governance_fields("[('company_id','in',company_ids)]") == {"company_id"}
+    assert governance_fields("[('user_id','=',user.id)]") == {"user_id"}
+    assert governance_fields("[('state','!=','draft')]") == set()
+    assert governance_fields("[('move_type','=','out_invoice')]") == set()
+    assert governance_fields("[('id','in',[1,2,3])]") == set()
+
+
+def test_gf_canonical_multicompany_or():
+    # literal leaf ('company_id','=',False) ignored; context leaf ('...','in',company_ids) wins
+    assert governance_fields(
+        "['|',('company_id','=',False),('company_id','in',company_ids)]") == {"company_id"}
+
+
+def test_gf_partner_context_and_uid():
+    assert governance_fields(
+        "[('commercial_partner_id','=',user.commercial_partner_id)]") == {"commercial_partner_id"}
+    assert governance_fields("[('user_id','=',uid)]") == {"user_id"}
+
+
+def test_gf_nested_rhs_container():
+    assert governance_fields("[('company_id','in',[company_id])]") == {"company_id"}
+    assert governance_fields("[('user_id','in',[user.id, False])]") == {"user_id"}
+
+
+def test_gf_own_records_create_uid_is_kept():
+    # create_uid = user.id is a legit own-records axis (not noise); kept.
+    assert governance_fields("[('create_uid','=',user.id)]") == {"create_uid"}
+
+
+def test_gf_never_raises():
+    assert governance_fields("[('a','=',1)") == set()    # unparseable
+    assert governance_fields("") == set()
+    assert governance_fields("[(1,'=',1)]") == set()      # global rule, no field
+
+
+def test_containment_edges_kill_audit_closure():
+    # Defect-2 regression: with containment-only edges (only move_id, no create_uid audit
+    # edge), the company_id closure for the line is the containment path, never via create_uid.
+    edges = sorted([("account.move.line", "move_id", "account.move")])
+    defines = {"company_id": {"account.move", "account.move.line"}}
+    mirrors = {"company_id": {"account.move.line"}}       # line.company_id is a stored-related mirror
+    ruled = {"company_id": {"account.move"}}
+    recs = _index(derive_gaps(edges, defines, ruled,
+                              ["account.move", "account.move.line"], mirrors))
+    r = recs[("account.move.line", "company_id")]
+    assert r["relation_path"] == "move_id.company_id", r["relation_path"]
+    assert "create_uid" not in (r["relation_path"] or "")
+    assert r["verdict"] == "GAP"
 
 
 if __name__ == "__main__":

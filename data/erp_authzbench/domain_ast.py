@@ -24,6 +24,15 @@ _OPERATORS = {
 _PUSHDOWN_OPS = {"=", "in"}
 _BOOL_TOKENS = {"|", "!"}        # OR / NOT make a domain non-conjunctive ('&' is implicit AND)
 
+# Root names that mark a rule leaf's RIGHT operand as the current-user/company CONTEXT.
+# A leaf binding a field to one of these is a row-level authorization axis (tenant/owner),
+# as opposed to a workflow/state filter bound to a literal. Temporal helpers (time,
+# context_today) are deliberately excluded — they are not authorization context.
+_CONTEXT_NAMES = frozenset({
+    "user", "uid", "company_id", "company_ids",
+    "allowed_company_ids", "companies", "company",
+})
+
 
 def _terminal(field_path):
     return field_path.rsplit(".", 1)[-1]
@@ -70,3 +79,49 @@ def parse_domain(domain_force):
     if bad_ops:
         reasons.append("op:" + ",".join(bad_ops))
     return (fields, True, "simple") if not reasons else (fields, False, ";".join(reasons))
+
+
+def _root_name(node):
+    """Root Name id of a Name/Attribute chain (user.partner_id.id -> 'user'), else None."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _rhs_is_context(rhs):
+    """True if any Name/Attribute anywhere in the RHS subtree roots in _CONTEXT_NAMES.
+
+    Walks the whole subtree so `in company_ids`, `= user.id`, `in [user.id, False]`,
+    `child_of company_ids` all count as context-bound.
+    """
+    for n in ast.walk(rhs):
+        if isinstance(n, ast.Name) and n.id in _CONTEXT_NAMES:
+            return True
+        if isinstance(n, ast.Attribute) and _root_name(n) in _CONTEXT_NAMES:
+            return True
+    return False
+
+
+def governance_fields(domain_force):
+    """Terminal field-names of leaves whose RIGHT operand references the user/company context.
+
+    A row-level authorization discriminator: a field bound (in some leaf, anywhere incl.
+    inside OR/NOT) to the current user/company context. Strict subset of parse_domain's
+    fields — filters workflow/state/flag fields compared to literals. Never raises.
+    """
+    src = (domain_force or "").strip()
+    if not src:
+        return set()
+    try:
+        tree = ast.parse(src, mode="eval")
+    except (SyntaxError, ValueError):
+        return set()
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Tuple, ast.List)) and len(node.elts) == 3:
+            lhs, op, rhs = node.elts
+            if (isinstance(lhs, ast.Constant) and isinstance(lhs.value, str)
+                    and isinstance(op, ast.Constant) and op.value in _OPERATORS
+                    and _rhs_is_context(rhs)):
+                out.add(_terminal(lhs.value))
+    return out

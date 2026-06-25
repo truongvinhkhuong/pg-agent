@@ -1,0 +1,67 @@
+model,rule,fields,governance_fields,pushdownable,reason
+account.account,Account multi-company,company_ids,company_ids,False,op:parent_of
+account.analytic.account,Analytic multi company rule,company_id,company_id,False,or/not;op:parent_of
+account.analytic.applicability,Analytic applicability multi company rule,company_id,company_id,False,or/not;op:parent_of
+account.analytic.distribution.model,Analytic distribution model multi company rule,company_id,company_id,False,or/not;op:parent_of
+account.analytic.line,account.analytic.line.billing.user,(none),(none),False,no-field
+account.analytic.line,account.analytic.line.readonly.user,(none),(none),False,no-field
+account.analytic.line,Analytic line multi company rule,company_id,company_id,True,simple
+account.bank.statement,Account bank statement company rule,company_id,company_id,True,simple
+account.bank.statement.line,Account bank statement line company rule,company_id,company_id,True,simple
+account.fiscal.position,Account fiscal Mapping company rule,company_id,company_id,False,op:parent_of
+account.group,Account Group multi-company,company_id,company_id,False,op:parent_of
+account.invoice.report,All Invoices Analysis,(none),(none),False,no-field
+account.invoice.report,Invoice Analysis multi-company,company_id,company_id,True,simple
+account.invoice.report,Personal Invoices Analysis,invoice_user_id,invoice_user_id,False,or/not
+account.journal,Journal multi-company,company_id,company_id,False,op:parent_of
+account.journal.group,Multi-ledger multi-company,company_id,company_id,False,or/not;op:parent_of
+account.move,All Journal Entries,(none),(none),False,no-field
+account.move,Readonly Move,(none),(none),False,no-field
+account.move,Readonly Move,(none),(none),False,no-field
+account.move,Account Entry,company_id,company_id,True,simple
+account.move,Personal Invoices,"invoice_user_id,move_type",invoice_user_id,False,or/not;multi-field
+account.move,All Invoices,move_type,(none),True,simple
+account.move,Portal Personal Account Invoices,"move_type,partner_id,state",partner_id,False,"multi-field;op:child_of,not in"
+account.move.line,All Journal Items,(none),(none),False,no-field
+account.move.line,Readonly Move Line,(none),(none),False,no-field
+account.move.line,Readonly Move Line,(none),(none),False,no-field
+account.move.line,Entry lines,company_id,company_id,True,simple
+account.move.line,Personal Invoice Lines,"invoice_user_id,move_type",invoice_user_id,False,or/not;multi-field
+account.move.line,All Invoice Lines,move_type,(none),True,simple
+account.move.line,Portal Invoice Lines,"move_type,parent_state,partner_id",partner_id,False,"multi-field;op:child_of,not in"
+account.payment,Account payment company rule,company_id,company_id,True,simple
+account.payment.term,Account payment term company rule,company_id,company_id,False,or/not;op:parent_of
+account.reconcile.model,Account reconcile model template company rule,company_id,company_id,False,op:parent_of
+account.reconcile.model.line,Account reconcile model_line template company rule,company_id,company_id,False,op:parent_of
+account.report.external.value,Report External Value multi-company,company_id,company_id,True,simple
+account.tax,Tax multi-company,company_id,company_id,False,op:parent_of
+account.tax.group,Tax group multi-company,company_id,company_id,False,op:parent_of
+account.tax.repartition.line,Tax Repartition multi-company,company_id,company_id,False,or/not;op:parent_of
+sale.order,All Orders,(none),(none),False,no-field
+sale.order,Sales Order multi-company,company_id,company_id,True,simple
+sale.order,Portal Personal Quotations/Sales Orders,partner_id,partner_id,False,op:child_of
+sale.order,Personal Orders,user_id,user_id,False,or/not
+sale.order.line,All Orders Lines,(none),(none),False,no-field
+sale.order.line,Stock User Sales Orders Line,(none),(none),False,no-field
+sale.order.line,Sales Order Line multi-company,company_id,company_id,True,simple
+sale.order.line,Portal Sales Orders Line,partner_id,partner_id,False,op:child_of
+sale.order.line,Personal Order Lines,salesman_id,salesman_id,False,or/not
+sale.report,All Orders Analysis,(none),(none),False,no-field
+sale.report,Sales Order Analysis multi-company,company_id,company_id,True,simple
+sale.report,Personal Orders Analysis,user_id,user_id,False,or/not
+stock.location,Location multi-company,company_id,company_id,True,simple
+stock.lot,Stock Production Lot multi-company,company_id,company_id,True,simple
+stock.move,stock_move multi-company,company_id,company_id,True,simple
+stock.move.line,stock_move_line multi-company,company_id,company_id,True,simple
+stock.package,stock_package multi-company,company_id,company_id,True,simple
+stock.picking,stock_picking multi-company,company_id,company_id,True,simple
+stock.picking,Portal Follower Transfers,partner_id,partner_id,False,or/not
+stock.picking.type,Stock Operation Type multi-company,company_id,company_id,True,simple
+stock.putaway.rule,Stock Operation Type multi-company,company_id,company_id,True,simple
+stock.quant,stock_quant multi-company,company_id,company_id,True,simple
+stock.route,stock_route multi-company,company_id,company_id,True,simple
+stock.rule,product_pulled_flow multi-company,company_id,company_id,True,simple
+stock.scrap,stock_scrap_company multi-company,company_id,company_id,True,simple
+stock.storage.category,stock_storage_category multi-company,company_id,company_id,True,simple
+stock.warehouse,Warehouse multi-company,company_id,company_id,True,simple
+stock.warehouse.orderpoint,stock_warehouse.orderpoint multi-company,company_id,company_id,True,simple

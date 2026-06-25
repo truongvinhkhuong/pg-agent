@@ -46,14 +46,17 @@ pg-agent/
 │   ├── generate_synthetic.py       # deterministic synthetic generator (no real data)
 │   ├── attacks.py                  # core suite (v3.1) + tagged extensions
 │   ├── adaptive.py                 # T4.5 adaptive-probing variant suite
-│   ├── policy_closure.py           # F10 PoC: pure closure-derivation core (no Odoo)
+│   ├── policy_closure.py           # F10: pure closure-derivation core — derive_closures + derive_gaps (no Odoo)
+│   ├── domain_ast.py               # F10: pure ir.rule domain extractor (parse_domain + governance_fields)
 │   └── attacks_experimental.py     # ungrounded generality demos (ownership-bypass)
 ├── tests/
 │   ├── evaluation_script.py        # benchmark harness -> environment × attack matrix + metrics
-│   ├── policy_linter.py            # F10 PoC: policy-closure differential linter (lint/lint_gate)
+│   ├── policy_linter.py            # F10 PoC: pco-mock policy-closure differential linter
+│   ├── policy_scan.py              # F10 Increment 1: module-agnostic scale scan (real Odoo CE)
 │   ├── test_output_validator.py    # offline pytest (no Odoo)
 │   ├── test_sensitivity_registry.py  # offline pytest (no Odoo)
-│   └── test_policy_closure.py      # offline pytest — closure-derivation core (no Odoo)
+│   ├── test_policy_closure.py      # offline pytest — closure-derivation core (no Odoo)
+│   └── test_policy_scan.py         # offline pytest — derive_gaps + governance_fields (no Odoo)
 ├── config/
 │   ├── odoo.mock.conf              # PUBLIC mode (no private path)
 │   └── odoo.prod.conf              # PRIVATE/validation mode
@@ -212,6 +215,36 @@ Two payoffs it demonstrates on the mock: (1) the derived team/company paths **re
 is offline-unit-tested by `tests/test_policy_closure.py`. Company axis comes back `ROOT-UNGOVERNED` on every
 model — no native company rule exists anywhere (the tenant-bypass vector). Committed reference copies:
 [`results/policy_lint.csv`](results/policy_lint.csv) (V-vuln) and [`results/vrule/policy_lint.csv`](results/vrule/policy_lint.csv).
+
+### Scale scan on real Odoo CE (F10 Increment 1)
+
+[`tests/policy_scan.py`](tests/policy_scan.py) generalizes the linter to *any* module set and runs it on **vanilla
+Odoo CE `sale`+`account`+`stock`** — a real, large schema (the private `pco_core` is validated separately via
+`odoo.prod.conf`, never in this public repo). It is **purely static/read-only**: it auto-discovers the governance
+graph from `ir.model.fields` + `ir.rule` with two semantic filters — **context-bound discriminators** (a field is
+an axis only if a rule leaf binds it to the user/company context, via
+[`domain_ast.governance_fields`](data/erp_authzbench/domain_ast.py)) and **containment-only edges**
+(`required + ondelete=cascade`, so closures follow the composing parent, not audit/owner FKs).
+
+Result (62 models, 15 containment edges, 6 discriminators; committed in
+[`results/scale/coverage.csv`](results/scale/coverage.csv) + `rules.csv`):
+
+- **5 genuine relational-traversal GAPs auto-discovered in vanilla Odoo CE** — a child reachable to a row-governed
+  parent but lacking its own rule, e.g. `sale.order.line` → closure `order_id.user_id` (no own salesperson rule),
+  `account.payment.term.line` → `payment_id.company_id`, `account.fiscal.position.account` →
+  `position_id.company_id`, `stock.storage.category.capacity` → `storage_category_id.company_id`,
+  `account.bank.statement.line` → `move_id.invoice_user_id`. The same data-result-plane failure class as the pco
+  mock, now confirmed on a real ERP it does not own.
+- **Governance-map correctness:** `company_id` is broadly `GOVERNED` (34/41 reachable) — the scanner agrees with
+  Odoo's per-model multi-company design (soundness evidence; the noisy first pass that mis-classified
+  `state`/`id`/`create_uid` as axes is gone).
+- **Manual-burden (secondary, honest):** 11 relational closures auto-derived vs the 9 hand-written `POLICY` paths
+  (~1.2×). CE containment chains are shallow, so the burden ratio is modest here; the heavier-burden / heavier-gap
+  target is the bespoke `pco_core` (private) or a larger module set.
+
+The pure derivation core (`policy_closure.derive_gaps`) + the AST extractor are offline-unit-tested by
+[`tests/test_policy_scan.py`](tests/test_policy_scan.py) (20 cases incl. the audit-FK-closure regression).
+**Increment 2** (future) emits `ir.rule`/`POLICY` from the derived closures + runtime-verifies gap closure.
 
 Repeat after switching `pco_core_mock/__manifest__.py` to `team_security_vrule.xml` and
 reinstalling (`-u pco_core_mock`) to produce the V-rule row of the matrix —
