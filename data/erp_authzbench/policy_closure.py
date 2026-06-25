@@ -104,3 +104,100 @@ def derive_closures(edges, rules_by_axis, discriminators, scope_models=None):
                 "derived_closure": path if verdict == "GAP" else None,
             })
     return out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Module-agnostic generalization (F10 Increment 1): field-keyed, multi-definer.
+# derive_closures above stays the single-definer PoC entry point (unchanged); the
+# generalized scanner uses derive_gaps so a discriminator field may be DEFINED on
+# many models (real Odoo: company_id/user_id live on dozens of models).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _nearest_definer_path(model, edges, hops0_definers, all_definers, field):
+    """Relation path from `model` to the NEAREST model that defines `field`.
+
+    hops0_definers : models eligible at hops 0 (genuine LOCAL definer of the field).
+    all_definers   : models eligible as a BFS target at hops >= 1 (includes stored-
+                     related mirrors — a parent reached through a child's M2O still
+                     terminates a path).
+    Returns (path|None, hops|None, definer_model|None). Deterministic: BFS by hop
+    distance, frontier scanned in edge input order (pass canonically-sorted edges);
+    the model itself is never a hops>=1 target (visited guard), so a stored-related
+    mirror is forced to resolve to its real parent (the closure point).
+    """
+    if model in hops0_definers:
+        return field, 0, model
+    visited = {model}
+    queue = deque([(model, [], 0)])
+    while queue:
+        cur, prefix, hops = queue.popleft()
+        for (m, fld, tgt) in edges:
+            if m != cur:
+                continue
+            if tgt in all_definers:
+                return ".".join(prefix + [fld, field]), hops + 1, tgt
+            if tgt not in visited:
+                visited.add(tgt)
+                queue.append((tgt, prefix + [fld], hops + 1))
+    return None, None, None
+
+
+def derive_gaps(edges, defines, ruled, scope_models, exclude_self_definer=None):
+    """Module-agnostic generalization of derive_closures (field-keyed, multi-definer).
+
+    edges:    list[(model, m2o_field, target_model)]  — Many2one graph (in-scope only)
+    defines:  dict[field -> set(models that carry the STORED column)] — BFS targets
+    ruled:    dict[field -> set(models with an active rule referencing field)]
+              The discovered discriminators are exactly `set(ruled)`.
+    scope_models: iterable[str] to classify.
+    exclude_self_definer: dict[field -> set(models)] that carry the field ONLY as a
+              stored-RELATED mirror -> excluded from hops-0 definers, forcing a
+              relational closure (e.g. line.company_id mirror -> order_id.company_id,
+              not the degenerate local company_id). Default: none.
+
+    Reuses the same 5-verdict ladder as derive_closures, with parent_governed keyed on
+    the NEAREST reached definer. Returns list[record] sorted by (model, field):
+        {model, field, discriminator, relation_path|None, hops, reachable,
+         axis_governed, parent_governed, native_rule, verdict, derived_closure|None,
+         definer_model|None}
+    """
+    exclude_self_definer = exclude_self_definer or {}
+    out = []
+    for model in sorted(scope_models):
+        for field in sorted(ruled):
+            all_defs = defines.get(field) or set()
+            hops0 = all_defs - (exclude_self_definer.get(field) or set())
+            path, hops, definer = _nearest_definer_path(model, edges, hops0, all_defs, field)
+            reachable = path is not None
+
+            governed = ruled.get(field) or set()
+            axis_governed = bool(governed)
+            native_rule = model in governed
+            parent_governed = (definer in governed) if definer is not None else False
+
+            if not reachable:
+                verdict = "UNREACHABLE"
+            elif not axis_governed:
+                verdict = "ROOT-UNGOVERNED"
+            elif native_rule:
+                verdict = "GOVERNED"
+            elif parent_governed:
+                verdict = "GAP"
+            else:
+                verdict = "PARENT-UNGOVERNED"
+
+            out.append({
+                "model": model,
+                "field": field,
+                "discriminator": field,
+                "relation_path": path,
+                "hops": hops if hops is not None else -1,
+                "reachable": reachable,
+                "axis_governed": axis_governed,
+                "parent_governed": parent_governed,
+                "native_rule": native_rule,
+                "verdict": verdict,
+                "derived_closure": path if verdict == "GAP" else None,
+                "definer_model": definer,
+            })
+    return out
