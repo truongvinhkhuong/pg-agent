@@ -54,7 +54,9 @@ pg-agent/
 │   ├── policy_closure.py           # F10: pure closure-derivation core — derive_closures + derive_gaps (no Odoo)
 │   ├── domain_ast.py               # F10: pure ir.rule domain extractor (parse_domain + governance_fields)
 │   ├── policy_emit.py              # F10 Increment 2: pure emit core (POLICY + native ir.rule, no Odoo)
-│   ├── integrity.py                # T4.3 integrity test set (symbolic gold) — RQ6
+│   ├── integrity.py                # T4.3 integrity test set + wrong-formula set (symbolic gold) — RQ6
+│   ├── metrics.py                  # TB.3 governed-metrics registry (no Odoo)
+│   ├── consistency.py              # TB.2 pure execution-voting core (no Odoo)
 │   └── attacks_experimental.py     # ungrounded generality demos (ownership-bypass)
 ├── tests/
 │   ├── evaluation_script.py        # benchmark harness -> environment × attack matrix + metrics
@@ -65,7 +67,8 @@ pg-agent/
 │   ├── test_policy_closure.py      # offline pytest — closure-derivation core (no Odoo)
 │   ├── test_policy_scan.py         # offline pytest — derive_gaps + governance_fields (no Odoo)
 │   ├── test_policy_emit.py         # offline pytest — emit core (no Odoo)
-│   └── test_numeric_verifier.py    # offline pytest — numeric verifier (no Odoo)
+│   ├── test_numeric_verifier.py    # offline pytest — numeric verifier (no Odoo)
+│   └── test_metrics_and_consistency.py  # offline pytest — metrics + voting + TB.1 blind-spot (no Odoo)
 ├── config/
 │   ├── odoo.mock.conf              # PUBLIC mode (no private path)
 │   └── odoo.prod.conf              # PRIVATE/validation mode
@@ -192,8 +195,30 @@ silently-**wrong** one per question and runs the verifier:
 
 **Honest scope:** no LLM in the public artifact — this demonstrates the verifier's *mechanism* (catch
 unbindable, pass legitimate derivations), not a measured model hallucination rate (validated privately).
-TB.1 catches **fabricated / cross-data** numbers; *correct-arithmetic-with-the-wrong-formula* is a
-documented limitation that TB.2 (self-consistency) / TB.3 (governed metrics) address.
+TB.1 catches **fabricated / cross-data** numbers but **misses correct-arithmetic-with-the-wrong-formula**
+(a number that *is* a valid derivation of the data yet answers a different question) — closed by TB.2/TB.3 below.
+
+#### Wrong-formula — governed metrics (TB.3) + self-consistency (TB.2)
+
+[`metrics.py`](data/erp_authzbench/metrics.py) is a governed-metric registry (5 metrics; `metric_engine` computes
+each deterministically *through the guard* — the authz domain pins the rows, the registry pins measure+agg → the
+right formula over the right rows by construction). [`consistency.py`](data/erp_authzbench/consistency.py) is a pure
+execution-voting core (strict majority; a minority wrong-formula is outvoted, a no-majority question is refused).
+[`integrity_formula(env)`](results/integrity_formula.csv) runs the ladder on 6 wrong-formula questions whose wrong
+value **binds under TB.1** (it equals a legitimate derivation target — an *identity*, *pairwise-diff* or *share* —
+while answering a different question, e.g. one team's total reported as the all-team total):
+
+| config | wrong-formula caught |
+|---|---|
+| TB.1 only (numeric verifier) | **0/6** — every wrong value binds → silently wrong |
+| + TB.3 (governed metric, `raw != governed`) | **4/6** — the in-scope questions |
+| + TB.2 (self-consistency vote) | **6/6** — the out-of-scope tail (no metric) |
+
+Governed-metric coverage **4/6** (hybrid: out-of-scope carried by the vote). A 7th *contrast* question
+(`sum(amount_subtotal)` — forgot tax) is **caught by TB.1 already** (unbindable) — kept to mark the taxonomy
+boundary, excluded from the 0/6. Offline-tested by [`tests/test_metrics_and_consistency.py`](tests/test_metrics_and_consistency.py)
+(17 cases incl. deterministic proofs that WF-A..D bind TB.1 and the contrast does not). **Does not** claim a
+real-LLM wrong-formula rate (candidates/metric-selection are planted; mechanism demo only) or universal coverage.
 
 ## Run the benchmark (mock, no private access)
 
@@ -216,6 +241,7 @@ run(env, denial_enabled=False)  # denial-rich baseline -> Existence-Inference Ra
 ablation(env)                   # defense-in-depth ladder
 adaptive(env)                   # adaptive probing -> residual-risk per family (T4.5)
 integrity(env)                  # numeric verifier vs silently-wrong numbers -> results/integrity.csv (RQ6)
+integrity_formula(env)          # wrong-formula ladder: TB.1 -> +TB.3 -> +TB.2 -> results/integrity_formula.csv
 export_results(env)             # regenerate every paper table -> results/*.csv + results.json
 PY
 ```

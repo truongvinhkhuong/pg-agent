@@ -30,4 +30,7 @@ repos:
         entry: python3 scripts/check_no_raw_dumps.py
         language: system
         types: [text]
-        exclude: ^(data/erp_authzbench/(generate_synthetic|attacks)\.py|docs/|README\.md)
+        # results/ = CSVs generated deterministically from the seed=42 synthetic data (no real-data
+        # path); the MST/tax-id heuristic false-positives on synthetic 10-digit VND amounts.
+        # detect-secrets still scans them for actual secrets.
+        exclude: ^(data/erp_authzbench/(generate_synthetic|attacks)\.py|docs/|README\.md|results/)

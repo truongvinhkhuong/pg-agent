@@ -1,0 +1,8 @@
+id,kind,persona,metric,in_scope,governed_value,wrong_kind,wrong_value,tb1_binds_misses,tb1_caught,tb3_caught,tb2_caught,contrast
+fml-topgroup-sum,wrong-aggregation-scope,viewer_all,net_revenue_by_team,True,11487300000.0,top_group_instead_of_sum,3767500000.0,yes,no,yes,yes,no
+fml-leadteam,wrong-filter,viewer_all,net_revenue_by_team,True,3767500000.0,wrong_group_identity,3324200000.0,yes,no,yes,yes,no
+fml-wrongagg-avg,wrong-aggregation,viewer_all,avg_order_value,True,675723529.41,sum_instead_of_avg,11487300000.0,yes,no,yes,yes,no
+fml-qty-topgroup,wrong-aggregation-scope,ttv,total_quantity_by_product,True,156.0,top_group_instead_of_sum,44.0,yes,no,yes,yes,no
+fml-oos-pairdiff,wrong-pair-diff,viewer_all,net_revenue_by_team,False,443300000.0,wrong_pair_diff,1553200000.0,yes,no,no,yes,no
+fml-oos-share,wrong-share,viewer_all,net_revenue_by_team,False,32.8,wrong_share,28.9,yes,no,no,yes,no
+fml-contrast-subtotal,forgot-tax,viewer_all,net_revenue_by_team,True,11487300000.0,subtotal_instead_of_total,10443000000.0,no,yes,yes,yes,yes

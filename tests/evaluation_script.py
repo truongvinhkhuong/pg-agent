@@ -779,6 +779,123 @@ def integrity(env, outdir="results"):
     return out
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TB.3 governed-metrics engine + TB.2 self-consistency: catch "correct-arithmetic-
+# WRONG-FORMULA" (TB.1's blind spot). The engine routes the pinned measure+agg through
+# the guard (authz domain pins the rows) -> right formula + right rows by construction.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def metric_engine(guard, name):
+    """Deterministic governed-metric value via the guard -> (scalar, by_dimension)."""
+    from metrics import metric_spec
+    m = metric_spec(name)
+    model, measure, agg, dim, dom = (m["model"], m["measure"], m["agg"],
+                                     m["dimension"], m["domain"])
+    if agg == "count":
+        return float(guard.guarded_search_count(model, dom)), {}
+    grp = guard.guarded_read_group(model, dom, [measure], [dim] if dim else [])
+    if grp and all(measure not in g for g in grp):
+        return None, {}                          # measure masked away (below clearance)
+    vals = [g[measure] for g in grp if g.get(measure) is not None]
+    by_dim = {g.get(dim): g[measure] for g in grp if dim and g.get(measure) is not None}
+    if agg == "sum":
+        return float(sum(vals)), by_dim
+    if agg == "avg":
+        cnt = guard.guarded_search_count(model, dom)   # read_group returns per-group SUMS, not means
+        return (float(sum(vals)) / cnt if cnt else 0.0), by_dim
+    raise ValueError(agg)
+
+
+def _formula_gold_value(q, vals, scalar):
+    """(gold, is_pct) — the correct answer the question asks for, from the governed table."""
+    gk = q["gold_kind"]
+    if gk == "sum":
+        return float(sum(vals)), False
+    if gk == "avg":
+        return float(scalar), False
+    if gk == "max":
+        return float(max(vals)), False
+    if gk == "pairdiff":
+        s = sorted(vals, reverse=True)
+        return float(s[0] - s[1]), False
+    if gk == "top_share":
+        t = sum(vals)
+        return round(max(vals) / t * 100, 1) if t else 0.0, True
+    raise ValueError(gk)
+
+
+def integrity_formula(env, outdir="results"):
+    """RQ6 / wrong-formula ladder: TB.1 misses WF-A..D (the value binds) -> TB.3 governed metric
+    catches in-scope -> TB.2 self-consistency vote catches the out-of-scope tail. NO LLM."""
+    GUARD_CONFIG["enforce_masking"] = True
+    if denial_svc:
+        denial_svc.DENIAL_CONFIG["enabled"] = True
+    companies, _ = seed(env)
+    from integrity import INTEGRITY_FORMULA, formula_wrong_value
+    from consistency import self_consistency
+
+    print("\n=== ERP-AuthZBench — integrity formula / RQ6 (TB.1 blind spot -> TB.3 + TB.2) ===")
+    print("(no LLM: planted candidates + governed metric; wrong values BIND under TB.1)")
+    print(f"{'id':<22}{'in_scope':<10}{'TB.1':<8}{'+TB.3':<8}{'+TB.2'}")
+    print("-" * 70)
+
+    out = []
+    blind = ladder_tb1 = ladder_tb3 = ladder_tb2 = 0
+    covered = 0
+    for q in INTEGRITY_FORMULA:
+        user = make_persona(env, q["persona"], companies)
+        guard = _persona_env(env, user, PERSONAS[q["persona"]])["pg.agent.guard"]
+        scalar, by_dim = metric_engine(guard, q["metric"])
+        vals = list(by_dim.values()) if by_dim else ([scalar] if scalar is not None else [])
+
+        gold, _is_pct = _formula_gold_value(q, vals, scalar)
+        wrong = formula_wrong_value(q["wrong_kind"], vals)
+        wrong_is_pct = q["wrong_kind"] == "wrong_share"
+        wrong_text = f"Kết quả: {(str(round(wrong, 1)) + '%') if wrong_is_pct else _vn(wrong)}."
+
+        tb1_caught = bool(guard.guarded_verify_numbers(wrong_text, vals).unbound)
+        tb3_caught = bool(q["in_scope"]) and round(wrong, 2) != round(gold, 2)
+        sc = self_consistency([gold, gold, wrong], governed=(gold if q["in_scope"] else None))
+        tb2_caught = sc.flagged or bool(sc.minority)
+
+        is_contrast = q["wrong_kind"] == "subtotal_instead_of_total"
+        if not is_contrast:
+            blind += 1
+            ladder_tb1 += int(tb1_caught)                                   # expect 0
+            ladder_tb3 += int(tb1_caught or (q["in_scope"] and tb3_caught))
+            ladder_tb2 += int(tb1_caught or (q["in_scope"] and tb3_caught) or tb2_caught)
+            if q["in_scope"]:
+                covered += 1
+
+        out.append({"id": q["id"], "kind": q["kind"], "persona": q["persona"],
+                    "metric": q["metric"], "in_scope": q["in_scope"],
+                    "governed_value": round(gold, 2), "wrong_kind": q["wrong_kind"],
+                    "wrong_value": round(wrong, 2),
+                    "tb1_binds_misses": "yes" if not tb1_caught else "no",
+                    "tb1_caught": "yes" if tb1_caught else "no",
+                    "tb3_caught": "yes" if tb3_caught else "no",
+                    "tb2_caught": "yes" if tb2_caught else "no",
+                    "contrast": "yes" if is_contrast else "no"})
+        tag = "CONTRAST" if is_contrast else ("in" if q["in_scope"] else "out")
+        print(f"{q['id']:<22}{tag:<10}{('catch' if tb1_caught else 'MISS'):<8}"
+              f"{('catch' if tb3_caught else '-'):<8}{'catch' if tb2_caught else '-'}")
+
+    print("-" * 70)
+    print(f"Wrong-formula caught (WF blind-spot class, excl. contrast): "
+          f"TB.1 {ladder_tb1}/{blind} -> +TB.3 {ladder_tb3}/{blind} -> +TB.2 {ladder_tb2}/{blind}")
+    print(f"Governed-metric coverage: {covered}/{blind} (hybrid: out-of-scope carried by TB.2 vote)")
+    print("Contrast (forgot-tax) is caught by TB.1 already (excluded from the 0/N). No LLM: "
+          "mechanism demo (engine + vote); real wrong-formula rate validated privately.\n")
+
+    os.makedirs(outdir, exist_ok=True)
+    _write_csv(os.path.join(outdir, "integrity_formula.csv"),
+               ["id", "kind", "persona", "metric", "in_scope", "governed_value", "wrong_kind",
+                "wrong_value", "tb1_binds_misses", "tb1_caught", "tb3_caught", "tb2_caught",
+                "contrast"], out)
+    print(f"Wrote integrity_formula.csv ({len(out)} rows) -> {outdir}/\n")
+    return out
+
+
 def export_results(env, outdir="results"):
     """One command to regenerate every table the paper cites (CSV + JSON)."""
     os.makedirs(outdir, exist_ok=True)

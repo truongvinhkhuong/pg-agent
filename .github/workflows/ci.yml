@@ -29,6 +29,7 @@ jobs:
           python tests/test_policy_scan.py
           python tests/test_policy_emit.py
           python tests/test_numeric_verifier.py
+          python tests/test_metrics_and_consistency.py
 
       - name: Secret + raw-data regression gate (detect-secrets via pre-commit)
         run: |
