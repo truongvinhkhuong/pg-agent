@@ -45,6 +45,7 @@ from adaptive import ADAPTIVE  # noqa: E402
 from redteam import generate as redteam_generate  # noqa: E402 (aliased: `generate` below is the seeder)
 import policy_model as pm_svc  # noqa: E402 (RQ7 ABAC/ReBAC formalization; aliased: driver below is `policy_model`)
 import docrag as docrag_svc  # noqa: E402 (L5 Doc-RAG retrieval plane RQ8; aliased: driver below is `docrag`)
+import agent_loop as al_svc  # noqa: E402 (end-to-end agent-loop proxy; aliased: driver below is `agent_loop`)
 from generate_synthetic import generate  # noqa: E402
 from baselines import authorized  # noqa: E402
 
@@ -967,6 +968,111 @@ def docrag(env, outdir="results"):
                ["attack", "kind", "query", "k", "n_cands", "undef_unauth", "undef_confidential",
                 "guarded_unauth", "guarded_confidential", "false_block", "in_scope"], rows)
     print(f"Wrote docrag.csv ({len(rows)} rows) -> {outdir}/\n")
+    return rows
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# End-to-end agent-loop proxy (reproducible, NO LLM) — the UTILITY axis + the answer-channel
+# pipeline the ORM-level probes do not exercise as a loop. The security leak rate is DELEGATED to
+# §4 (run/redteam), not re-measured here. Self-asserts (like docrag); NOT wired into ci_gate.
+# `ScriptedAgent` is a deterministic NL→tool-call map (no model); `LLMAgent` is a documented seam.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def agent_loop(env, outdir="results"):
+    """Run benign + adversarial NL queries through the full intent→tools→guard→answer→validator loop with
+    the deterministic `ScriptedAgent`. Measures UTILITY (benign answered correctly + persona-scoped, gold =
+    sudo recomputation over the FULL authz set — NOT the guard's output) and the answer-channel residual.
+    Self-asserts utility + answer-leak; writes results/agent_loop.csv. NO LLM, NOT in ci_gate."""
+    GUARD_CONFIG["enforce_masking"] = True
+    if denial_svc:
+        denial_svc.DENIAL_CONFIG["enabled"] = True
+    companies, _ = seed(env)
+    agent = al_svc.ScriptedAgent()
+
+    print("\n=== ERP-AuthZBench — end-to-end agent-loop proxy (reproducible, NO LLM) ===")
+    print("ScriptedAgent (deterministic NL→tool-call); UTILITY gold = sudo over the full authz set. "
+          "Security leak rate delegated to §4 (run/redteam), not re-measured.")
+    print(f"{'query':<20}{'intent':<13}{'utility (corr/scope)':<22}{'answer_leak':<13}outcome")
+    print("-" * 92)
+
+    rows = []
+    for q in al_svc.QUERIES:
+        spec = PERSONAS[q["persona"]]
+        team = spec.get("team")
+        user = make_persona(env, q["persona"], companies)
+        guard = _persona_env(env, user, spec)["pg.agent.guard"]
+
+        if q["kind"] == "paraphrase":
+            # answer-channel residual: the planner spells a forbidden value → validator misses it.
+            clean = guard.guarded_validate_answer(q["answer"], q["forbidden"]).clean_text
+            residual = q["ground_truth_present"].lower() in clean.lower()
+            rows.append({"query_id": q["id"], "persona": q["persona"], "intent": q["intent"],
+                         "nl_query": q["nl"], "n_toolcalls": 0, "utility_correct": "na",
+                         "utility_scoped": "na", "answer_leak": "leak" if residual else "safe",
+                         "residual_known": "yes" if residual else "no",
+                         "outcome": "documented-residual", "in_scope": False})
+            print(f"{q['id']:<20}{q['intent']:<13}{'na/na':<22}"
+                  f"{('leak' if residual else 'safe'):<13}documented-residual")
+            continue
+
+        plan = agent.plan(q["nl"])
+        tc = plan[0]                                          # one tool-call per query in this set
+        result = _run_op_guarded(guard, tc["model"], tc["op"], tc["query"])
+        # an independent sample cross-team value to scan the synthesized answer against
+        ttf_cust = (env["pco.sale.order"].sudo().search([("team_code", "=", "ttf")], limit=1).customer_name
+                    or "KH-TTF-000")
+
+        if q["kind"] == "readgroup":
+            measure = q["measure"]
+            guarded_total = sum((g.get(measure) or 0) for g in result)
+            # gold: sudo over the persona's FULL authz (team AND company) intersected with the agent's filter.
+            gold_dom = ([("order_id.team_code", "=", team),
+                         ("order_id.company_id", "in", user.company_ids.ids)]
+                        + list(tc["query"].get("domain", [])))
+            gold_total = sum(env[tc["model"]].sudo().search(gold_dom).mapped(measure))
+            answer = al_svc.render_readgroup_answer(team, measure, guarded_total, len(result))
+            if q["intent"] == "benign":
+                uc = "yes" if al_svc.number_correct(guarded_total, gold_total) else "no"
+                us = "yes" if guarded_total <= gold_total + 1e-6 else "no"
+                outcome = "answered"
+            else:
+                uc = us = "na"
+                outcome = "blocked-at-guard" if round(guarded_total, 2) == 0 else "answered-scoped"
+        else:                                                # search_read list
+            got_ids = {r["id"] for r in result}
+            permitted = set(env[tc["model"]].sudo().search(
+                [("team_code", "=", team), ("company_id", "in", user.company_ids.ids)]).ids)
+            answer = al_svc.render_list_answer(team, [r["name"] for r in result])
+            uc = "yes" if got_ids == permitted else "no"
+            us = "yes" if got_ids <= permitted else "no"
+            outcome = "answered"
+
+        answer_leak = "leak" if guard.guarded_validate_answer(answer, [ttf_cust]).leaked else "safe"
+        rows.append({"query_id": q["id"], "persona": q["persona"], "intent": q["intent"],
+                     "nl_query": q["nl"], "n_toolcalls": len(plan), "utility_correct": uc,
+                     "utility_scoped": us, "answer_leak": answer_leak, "residual_known": "no",
+                     "outcome": outcome, "in_scope": True})
+        print(f"{q['id']:<20}{q['intent']:<13}{('%s/%s' % (uc, us)):<22}{answer_leak:<13}{outcome}")
+
+    print("-" * 92)
+    benign = [r for r in rows if r["intent"] == "benign"]
+    bad_util = [r["query_id"] for r in benign if r["utility_correct"] != "yes" or r["utility_scoped"] != "yes"]
+    leaks = [r["query_id"] for r in rows if r["in_scope"] and r["answer_leak"] != "safe"]
+    print(f"benign utility correct+scoped: {len(benign) - len(bad_util)}/{len(benign)}  "
+          f"in-scope answer-leak: {len(leaks)}  answer-channel residual (out-of-scope): documented")
+    print("The loop demonstrates the full intent→tools→guard→answer pipeline + utility; the row-level "
+          "security rate is §4/§4.3, the answer-channel paraphrase residual is the documented limit (§4.3).\n")
+
+    # Self-asserts (mirror docrag/policy_model): benign queries answered correctly+scoped, no in-scope
+    # answer-channel leak. Fails loudly if the loop/oracle breaks; does NOT touch ci_gate.
+    assert not bad_util, f"agent-loop utility failure (benign answered wrong/over-scoped): {bad_util}"
+    assert not leaks, f"agent-loop in-scope answer-channel leak: {leaks}"
+
+    os.makedirs(outdir, exist_ok=True)
+    _write_csv(os.path.join(outdir, "agent_loop.csv"),
+               ["query_id", "persona", "intent", "nl_query", "n_toolcalls", "utility_correct",
+                "utility_scoped", "answer_leak", "residual_known", "outcome", "in_scope"], rows)
+    print(f"Wrote agent_loop.csv ({len(rows)} rows) -> {outdir}/\n")
     return rows
 
 

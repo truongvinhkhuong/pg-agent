@@ -57,6 +57,7 @@ pg-agent/
 │   ├── policy_emit.py              # F10 Increment 2: pure emit core (POLICY + native ir.rule, no Odoo)
 │   ├── policy_model.py             # RQ7: pure ABAC×ReBAC formalization of POLICY (round-trips to _authz_domain)
 │   ├── docrag.py                   # RQ8 L5: pure Doc-RAG corpus + deterministic lexical retriever (no LLM)
+│   ├── agent_loop.py               # End-to-end agent-loop proxy: ScriptedAgent + LLMAgent seam (no LLM in CI)
 │   ├── integrity.py                # T4.3 integrity test set + wrong-formula set (symbolic gold) — RQ6
 │   ├── metrics.py                  # TB.3 governed-metrics registry (no Odoo)
 │   ├── consistency.py              # TB.2 pure execution-voting core (no Odoo)
@@ -277,6 +278,7 @@ adaptive(env)                   # adaptive probing -> residual-risk per family (
 redteam(env)                    # automated red-team: enumerate the ORM-pivot grammar -> results/redteam.csv (T4.5+)
 policy_model(env)               # ABAC/ReBAC formalization: round-trip vs _authz_domain -> results/policy_model.csv (RQ7)
 docrag(env)                     # L5 Doc-RAG: retrieval-plane PEP (drop unauthorized + mask) -> results/docrag.csv (RQ8)
+agent_loop(env)                 # end-to-end agent loop (ScriptedAgent): utility + answer channel -> results/agent_loop.csv
 integrity(env)                  # numeric verifier vs silently-wrong numbers -> results/integrity.csv (RQ6)
 integrity_formula(env)          # wrong-formula ladder: TB.1 -> +TB.3 -> +TB.2 -> results/integrity_formula.csv
 export_results(env)             # regenerate every paper table -> results/*.csv + results.json
