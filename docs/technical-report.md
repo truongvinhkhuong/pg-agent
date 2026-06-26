@@ -376,12 +376,29 @@ that residual (carried as one out-of-scope free-prose probe). **No real-LLM / em
   mechanics.
 - **RBAC / agent-security benchmarks:** OrgAccess (RBAC reasoning, GPT-4.1 F1≈0.27 — motivates LLM-outside),
   ASB, SecureMCP (table/column RBAC), Role-Conditioned Refusals (text-to-SQL).
+- **Concurrent agent-authorization work (2025–26)** — a fast-moving wave, all **orthogonal to the
+  data-result plane**: *τ-bench* and *PolicyBank* evaluate/refine agent adherence to natural-language
+  **policy text** at the tool-capability level (not row-level DB enforcement); mandatory-access-control
+  frameworks for multi-agent **privilege escalation** (the "Taming Privilege Escalation"/SEAgent line, 0%
+  ASR across prompt-injection / RAG-poisoning / confused-deputy *across agents*) and *Agent-GrantBox*
+  (least-privilege at the **tool/API** interface) govern the **call/permission**, not the returned rows;
+  *"A Vision for Access Control in LLM Agent Systems"* is a position paper. None targets ERP record-rule
+  incompleteness on child models or the relational-traversal row bypass.
+- **Denial-channel leakage:** *"Causality Laundering: Denial-Feedback Leakage in Tool-Calling LLM Agents"*
+  **formalizes** (causal theory) and **detects** information leakage through an agent's refusal/denial
+  feedback — the same channel our **uniform-denial** layer (T2.4/RQ5) attacks, but from the opposite end:
+  they characterize/measure the leak, we **operationally close** the observable (identical empty result +
+  constant-time, measured as Existence-Inference Rate 1/1 → 0/1, §4.4). Complementary: their lens is the
+  theory of the channel; ours is a deployable PEP defense + a benchmark metric for it.
 
 **Novelty (honest):** the *combination* — ERP record-rule incompleteness on child models × agent-driven
 relational-traversal exploitation × the first adversarial benchmark × a relational-closure compiler — not any
-single mechanism. We explicitly do **not** claim a novel authz+integrity unification (prior art) or a general
-policy compiler for agents (PCAS/OAP-adjacent). Subtitle framing: *"Policy-Closure Compilation for Row-Level
-Authorization in ERP LLM Agents."*
+single mechanism, and (per the 2025–26 wave above) **the data-result plane is the un-occupied niche**:
+concurrent agent-authorization work targets the control/permission plane, policy-text compliance, multi-agent
+MAC, or the denial-channel *theory*; none enforces or compiles **row-level** ERP record rules. We explicitly do
+**not** claim a novel authz+integrity unification (prior art) or a general policy compiler for agents
+(PCAS/OAP-adjacent). Subtitle framing: *"Policy-Closure Compilation for Row-Level Authorization in ERP LLM
+Agents."*
 
 ---
 
