@@ -48,6 +48,7 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 | 5.2.1 | endemicity (11 CE apps) | `scan_corpus(env, …)` | `results/scale/corpus/` | **scale (env-sensitive)** |
 | 5.3 | emit + verify | `emit_classify(env)` | `results/scale/emit.csv` | scale |
 | 5.3.1 | soundness frontier 1/5→3/5 | `soundness_report(env)` | `results/scale/soundness.csv` | **scale (env-sensitive)** |
+| 5.5 | cross-engine RLS gap+fix (RQ9) | `make rls` (`tools/rls_probe.sh`) | `results/rls.csv` | **opt-in (db-only, byte-stable)** |
 | 5.4 | ABAC/ReBAC round-trip (RQ7) | `policy_model(env)` | `results/policy_model.csv` | reproduce-all |
 | 6.1 / 6.2 | integrity (RQ6) | `integrity(env)` ; `integrity_formula(env)` | `results/integrity*.csv` | reproduce-all |
 | 7 | Doc-RAG plane (RQ8) | `docrag(env)` | `results/docrag.csv` | reproduce-all |
@@ -64,6 +65,8 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 - **§4.4** Existence-Inference 1/1 (denial OFF) → 0/1 (denial ON).
 - **§4.6** `BENCH_GATE: PASS` on V-vuln **and** V-rule.
 - **§5.3.1** the soundness theorem lifts emit 1/5 → 3/5 (4/6 on the Sales-app scan).
+- **§5.5** Postgres RLS, as `app_user`: V-native child read leaks 12 rows / 6 cross-tenant (LEAK); the
+  pushdown policy → 6 rows / 0 cross-tenant (SAFE); both positive controls `CONTROL-OK` (parent count 3<6).
 - **§10.1.1** real-LLM ASR-without-guard 2/12, **guarded 0/12** (one run, one model — see caveats).
 
 ## 5. Isolation / safety
@@ -86,3 +89,9 @@ only `pgagent-ae_*`. No `.env`/credentials are read by the core path.
   no real model are included; only the *measurement instrument* (`evaluation_script.py` / `ci_gate`) is public.
 - `config/odoo.mock.conf` documents the **source-install** addons layout; the Docker path passes
   `--addons-path` explicitly (the image layout differs).
+- **§5.5 (cross-engine RLS)** is a **demonstration of a gap *class*, not a defect or a rate**. Neither Odoo nor
+  Postgres is "broken": both apply security per-relation by design and default-allow an ungoverned child. The
+  vulnerable state is a realistic DBA misconfiguration (parent governed, FK-child not); the fix is the same
+  predicate pushdown. The probe runs as a `NOSUPERUSER NOBYPASSRLS` role (a superuser/owner would bypass RLS) —
+  the committed `parent-control` rows are the in-band proof that RLS actually fired. One schema, `postgres:16`,
+  two tenants; reads no `.env`/credentials.

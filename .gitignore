@@ -8,6 +8,8 @@ filestore/
 sessions/
 data_dir/
 *.sql
+# synthetic RQ9 demo SQL (single source of truth), NOT a data dump — must commit:
+!tools/rls_demo.sql
 *.dump
 docs/proposal-pg-agent-v3.1.md
 docs/sprint-backlog-pg-agent-v3.1.md

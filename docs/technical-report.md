@@ -26,8 +26,10 @@ metrics + execution-guided self-consistency) that drives the silently-wrong-numb
 correct-arithmetic-with-the-wrong-formula — framed as applied, not novelty. We additionally (iv) regression-gate
 the residual-risk surface with a deterministic, LLM-free **red-team grammar** that exhausts the ORM-pivot space
 (T4.5+); (v) **formalize** the bespoke POLICY as an instance of a general **ABAC×ReBAC** subject-context model
-whose compiler reproduces the guard's exact authorization domain (RQ7); and (vi) extend the PEP to a **Doc-RAG
-retrieval plane** that delivers chunks only re-rendered from row-authorized, clearance-masked sources (RQ8).
+whose compiler reproduces the guard's exact authorization domain (RQ7); (vi) extend the PEP to a **Doc-RAG
+retrieval plane** that delivers chunks only re-rendered from row-authorized, clearance-masked sources (RQ8); and
+(vii) show the gap is **paradigm-level, not an Odoo artifact** by reproducing the same relational-traversal leak
+and the same predicate-pushdown fix on a second engine, **PostgreSQL RLS** (RQ9).
 
 The contribution is scoped honestly to **applied security + benchmark + reference implementation** for an
 under-served setting (ERP record-rule governance that is incomplete on child models), not to a novel
@@ -55,7 +57,8 @@ returned. An LLM agent enlarges the attack surface precisely because it autonomo
 path a human rarely takes. (This direct-child-query bypass is documented native RLS behavior in other engines
 too — e.g. SQL Server applies a parent predicate only when the child is queried *via* the parent — so the
 phenomenon is general; the novelty is its agent-driven exploitation in ERP + the benchmark + the closure
-compiler.)
+compiler. We make this cross-engine claim concrete by reproducing the same gap and the same pushdown fix on
+**PostgreSQL RLS in §5.5 (RQ9)**.)
 
 ### 1.3 Threat model (summary)
 
@@ -326,6 +329,50 @@ on the header, 1 on a child); the company/owner contexts are recognized ABAC tok
 new enforcement** — it names what the guard already does (zero new ir.rule/attack; `ci_gate` untouched), and
 ABAC over un-populated attributes (state/region — vacuous on the synthetic data) is deliberately omitted.
 
+### 5.5 Cross-system generality — the gap is paradigm-level, not an Odoo artifact (RQ9) · [`results/rls.csv`](../results/rls.csv)
+
+A reviewer may ask whether the relational-traversal gap is an Odoo quirk. It is not. We reproduce the **same gap
+class and the same predicate-pushdown fix** on a second, independently-specified enforcement engine —
+**PostgreSQL Row-Level Security (RLS)** — making good on the forward reference in §1.2. The mapping is 1:1:
+`CREATE POLICY` ≈ an `ir.rule`; a child table with **RLS never enabled** ≈ a child model without a record rule
+(the realistic header-only misconfiguration); a **direct read of the child** relation ≈ the
+confused-deputy / BOLA traversal; and an **inline-`EXISTS` child policy** ≈ the PEP's forced derived row-domain
+(T1.2). A governed parent `orders` (tenant-isolation policy, `ENABLE` + `FORCE ROW LEVEL SECURITY`) has an
+ungoverned FK-child `order_lines`; the agent queries the child directly.
+
+The probe runs as a dedicated **`app_user` (`NOSUPERUSER NOBYPASSRLS`)** role — a superuser or table owner would
+*bypass* RLS and make the demonstration vacuous, so each run also emits an in-band **positive control**: the
+parent read must return only the tenant's own 3-of-6 orders (`CONTROL-OK`); a count of 6 would prove RLS never
+fired (`CONTROL-FAIL`). `cross_tenant_rows` is measured from a ground-truth `tenant` label on each line that
+**no policy ever reads** — an independent leak oracle, not "rows the policy let through" (the same non-circular
+posture as the Odoo `ground_truth_domain`). Result (`app_user`, tenant `ttv`, `postgres:16`):
+
+| variant | probe | rows visible | cross-tenant | verdict |
+|---|---|---|---|---|
+| V-native (child has no RLS) | parent-control | 3 | 0 | CONTROL-OK |
+| V-native (child has no RLS) | child-direct | **12** | **6** | **LEAK** |
+| V-pushdown (forced child policy) | parent-control | 3 | 0 | CONTROL-OK |
+| V-pushdown (forced child policy) | child-direct | **6** | **0** | **SAFE** |
+
+The ungoverned child leaks all 12 lines (6 cross-tenant); the inline pushdown
+`USING (EXISTS (SELECT 1 FROM orders o WHERE o.id = order_lines.order_id AND o.tenant = current_setting('app.tenant')))`
+closes it to the tenant's own 6 lines, 0 cross-tenant — and not by over-broad denial (the positive control still
+passes). We verified the trap empirically: the identical child query run as the superuser `odoo` returns 12/6
+even under V-pushdown, confirming the result is only meaningful as `app_user`.
+
+**Honest framing (no overclaim).** *Neither engine is broken.* Both Odoo record rules and Postgres RLS apply
+security **per relation by design** and **default-allow** a relation that was never governed; an ungoverned child
+is operating exactly as documented. The contribution is that an **LLM agent operationalizes** a realistic DBA
+misconfiguration — parent governed, FK-child not — by autonomously choosing the direct-child path a human query
+rarely takes, and that the **same predicate-pushdown fix** closes it in both engines. This is a demonstration of
+the gap *class*'s recurrence across paradigms, **not** a defect claim, **not** a leak rate, and **not** a semantic
+equivalence (the Odoo↔Postgres correspondence is an analogy at the gap/fix level; their default-allow paths differ
+in detail — Postgres' child is wide-open because RLS was never enabled, Odoo's is default-allow even in scope).
+One schema, one engine version, two tenants. Fully reproducible and byte-stable: `make rls` regenerates
+[`results/rls.csv`](../results/rls.csv) against the isolated stack's `postgres:16` (db-only, no Odoo, reads no
+credentials) and byte-diffs it; the offline `tests/test_rls_model.py` calibrates the verdict invariants + the
+positive control + a static safety-token lint of the SQL in CI without Docker.
+
 ---
 
 ## 6. Integrity — RQ6 (applied / adopt-not-invent)
@@ -478,6 +525,11 @@ Agents."*
 - **RQ8 gates delivery, not the index (§7):** the retrieval PEP re-checks provenance at delivery; the cleartext
   index and rank-order are named residuals, structural masking depends on field provenance (unstructured prose
   inherits the paraphrase residual), and no real-LLM / embedding RAG rate is claimed.
+- **RQ9 is a class demonstration, not a defect or a rate (§5.5):** the Postgres-RLS result reproduces the gap
+  *class* and the pushdown fix on one schema / one engine version / two tenants. It is **not** a claim that
+  Postgres RLS is broken (the ungoverned child is a realistic DBA misconfiguration operating as documented),
+  **not** a leak rate, and **not** an Odoo↔Postgres semantic equivalence (analogy at the gap/fix level only).
+  Validity rests on running as a `NOSUPERUSER NOBYPASSRLS` role; the committed positive-control row is the proof.
 - **Read-scoped:** write/create/unlink, prompt-injection elimination, and infrastructure threats are out of
   scope; prompt injection is "reduced + measured", not "eliminated".
 
@@ -586,7 +638,9 @@ silently-wrong-number rate to zero and closes the numeric verifier's wrong-formu
 4/6 → +TB.2 6/6) via deterministic governed metrics + execution-voting. Beyond the canonical results, the
 residual-risk surface is regression-gated by an exhaustive ORM-pivot **red-team grammar** (residual-leak 0/41);
 the bespoke POLICY is shown to be an instance of a general **ABAC×ReBAC** subject-context model whose formal
-compiler reproduces the guard's exact domain (RQ7, 20/20); and the PEP extends to a **Doc-RAG retrieval plane**
-that delivers chunks only re-rendered from row-authorized, clearance-masked sources (RQ8, guarded leak 0). The
+compiler reproduces the guard's exact domain (RQ7, 20/20); the PEP extends to a **Doc-RAG retrieval plane**
+that delivers chunks only re-rendered from row-authorized, clearance-masked sources (RQ8, guarded leak 0); and
+the relational-traversal gap is shown to be **paradigm-level** — the same leak and the same pushdown fix
+reproduce on **PostgreSQL RLS** (RQ9, 12/6 → 6/0). The
 work is applied-security + benchmark + reference implementation for an under-served setting, with an explicitly
 honest soundness frontier.

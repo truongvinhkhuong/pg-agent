@@ -68,8 +68,10 @@ correct-arithmetic-with-the-wrong-formula --- framed as applied, not novelty. We
 regression-gate the residual-risk surface with a deterministic, LLM-free \textbf{red-team grammar} that
 exhausts the ORM-pivot space (T4.5+); (v) \textbf{formalize} the bespoke POLICY as an instance of a general
 \textbf{ABAC$\times$ReBAC} subject-context model whose compiler reproduces the guard's exact authorization
-domain (RQ7); and (vi) extend the PEP to a \textbf{Doc-RAG retrieval plane} that delivers chunks only
-re-rendered from row-authorized, clearance-masked sources (RQ8).
+domain (RQ7); (vi) extend the PEP to a \textbf{Doc-RAG retrieval plane} that delivers chunks only
+re-rendered from row-authorized, clearance-masked sources (RQ8); and (vii) show the gap is
+\textbf{paradigm-level, not an Odoo artifact} by reproducing the same relational-traversal leak and the same
+predicate-pushdown fix on a second engine, \textbf{PostgreSQL RLS} (RQ9).
 
 The contribution is scoped honestly to \textbf{applied security + benchmark + reference implementation} for an
 under-served setting (ERP record-rule governance that is incomplete on child models), not to a novel
@@ -97,7 +99,8 @@ the rows are returned. An LLM agent enlarges the attack surface precisely becaus
 child/tool path a human rarely takes. (This direct-child-query bypass is documented native RLS behavior in
 other engines too --- e.g.\ SQL Server applies a parent predicate only when the child is queried \emph{via}
 the parent --- so the phenomenon is general; the novelty is its agent-driven exploitation in ERP + the
-benchmark + the closure compiler.)
+benchmark + the closure compiler. We make this cross-engine claim concrete by reproducing the same gap and the
+same pushdown fix on \textbf{PostgreSQL RLS in \S5.5 (RQ9)}.)
 
 \subsection{Threat model (summary)}
 Attacker = an employee probing beyond scope / prompt-injection / chaining, with a real role, natural-language
@@ -369,6 +372,38 @@ domain context). \textbf{Honest: formalization, not new enforcement} --- it name
 (zero new ir.rule/attack; \code{ci_gate} untouched), and ABAC over un-populated attributes (state/region ---
 vacuous on the synthetic data) is deliberately omitted.
 
+\subsection{Cross-system generality --- the gap is paradigm-level (RQ9)}
+\code{results/rls.csv}. Is the relational-traversal gap an Odoo quirk? No. We reproduce the \textbf{same gap
+class and the same predicate-pushdown fix} on a second, independently-specified enforcement engine ---
+\textbf{PostgreSQL Row-Level Security (RLS)} --- making good on the forward reference in \S1.2. The mapping is
+1:1: \code{CREATE POLICY} $\approx$ an \code{ir.rule}; a child table with \textbf{RLS never enabled} $\approx$ a
+child model without a record rule (the realistic header-only misconfiguration); a \textbf{direct read of the
+child} relation $\approx$ the confused-deputy/BOLA traversal; and an inline-\code{EXISTS} child policy
+$\approx$ the PEP's forced derived row-domain (T1.2). A governed parent \code{orders} (tenant-isolation policy,
+\code{ENABLE} + \code{FORCE ROW LEVEL SECURITY}) has an ungoverned FK-child \code{order\_lines}; the agent
+queries the child directly. The probe runs as a dedicated \code{app\_user} (\code{NOSUPERUSER NOBYPASSRLS})
+role --- a superuser or table owner would \emph{bypass} RLS and make the demonstration vacuous --- so each run
+emits an in-band \textbf{positive control}: the parent read must return only the tenant's own 3-of-6 orders
+(\code{CONTROL-OK}); a count of 6 would prove RLS never fired. \code{cross\_tenant\_rows} is measured from a
+ground-truth \code{tenant} label on each line that \textbf{no policy ever reads} (an independent leak oracle,
+the same non-circular posture as the Odoo \code{ground\_truth\_domain}). Result (\code{app\_user}, tenant
+\code{ttv}, \code{postgres:16}): the ungoverned child leaks all \textbf{12 lines, 6 cross-tenant (LEAK)}; the
+inline pushdown \code{USING (EXISTS (SELECT 1 FROM orders o WHERE o.id = order\_lines.order\_id AND o.tenant =
+current\_setting('app.tenant')))} closes it to the tenant's own \textbf{6 lines, 0 cross-tenant (SAFE)} --- and
+not by over-broad denial (the positive control still passes). We verified the trap empirically: the identical
+child query run as the superuser \code{odoo} returns 12/6 even under V-pushdown, confirming the result is only
+meaningful as \code{app\_user}. \textbf{Honest framing (no overclaim):} \emph{neither engine is broken} --- both
+Odoo record rules and Postgres RLS apply security \textbf{per relation by design} and \textbf{default-allow} a
+relation that was never governed; an ungoverned child is operating exactly as documented. The contribution is
+that an \textbf{LLM agent operationalizes} a realistic DBA misconfiguration by autonomously choosing the
+direct-child path, and that the \textbf{same predicate-pushdown fix} closes it in both engines. This is a
+demonstration of the gap \emph{class}'s recurrence across paradigms, \textbf{not} a defect claim, \textbf{not} a
+leak rate, and \textbf{not} a semantic equivalence (analogy at the gap/fix level only; one schema, one engine
+version, two tenants). Fully reproducible and byte-stable: \code{make rls} regenerates \code{results/rls.csv}
+against the isolated stack's \code{postgres:16} (db-only, no Odoo, reads no credentials) and byte-diffs it;
+\code{tests/test\_rls\_model.py} calibrates the verdict invariants + the positive control + a static
+safety-token lint of the SQL in CI without Docker.
+
 % =====================================================================
 \section{Integrity --- RQ6 (applied / adopt-not-invent)}
 A reliability threat orthogonal to authorization: an LLM agent that retrieves the \emph{right} rows can still
@@ -534,6 +569,12 @@ framing: \emph{``Policy-Closure Compilation for Row-Level Authorization in ERP L
   \item \textbf{RQ8 gates delivery, not the index (\S7):} the retrieval PEP re-checks provenance at delivery;
         the cleartext index and rank-order are named residuals, structural masking depends on field provenance
         (unstructured prose inherits the paraphrase residual), and no real-LLM / embedding RAG rate is claimed.
+  \item \textbf{RQ9 is a class demonstration, not a defect or a rate (\S5.5):} the Postgres-RLS result
+        reproduces the gap \emph{class} and the pushdown fix on one schema / one engine version / two tenants.
+        It is \textbf{not} a claim that Postgres RLS is broken (the ungoverned child is a realistic DBA
+        misconfiguration operating as documented), \textbf{not} a leak rate, and \textbf{not} an
+        Odoo$\leftrightarrow$Postgres semantic equivalence. Validity rests on running as a
+        \code{NOSUPERUSER NOBYPASSRLS} role; the committed positive-control row is the proof.
   \item \textbf{Read-scoped:} write/create/unlink, prompt-injection elimination, and infrastructure threats are
         out of scope; prompt injection is ``reduced + measured'', not ``eliminated''.
 \end{itemize}
@@ -649,8 +690,10 @@ drives the silently-wrong-number rate to zero and closes the numeric verifier's 
 canonical results, the residual-risk surface is regression-gated by an exhaustive ORM-pivot \textbf{red-team
 grammar} (residual-leak 0/41); the bespoke POLICY is shown to be an instance of a general
 \textbf{ABAC$\times$ReBAC} subject-context model whose formal compiler reproduces the guard's exact domain
-(RQ7, 20/20); and the PEP extends to a \textbf{Doc-RAG retrieval plane} that delivers chunks only re-rendered
-from row-authorized, clearance-masked sources (RQ8, guarded leak 0). The work is applied-security + benchmark +
+(RQ7, 20/20); the PEP extends to a \textbf{Doc-RAG retrieval plane} that delivers chunks only re-rendered
+from row-authorized, clearance-masked sources (RQ8, guarded leak 0); and the relational-traversal gap is shown
+to be \textbf{paradigm-level} --- the same leak and the same pushdown fix reproduce on \textbf{PostgreSQL RLS}
+(RQ9, 12/6 $\to$ 6/0). The work is applied-security + benchmark +
 reference implementation for an under-served setting, with an explicitly honest soundness frontier.
 
 \end{document}

@@ -74,7 +74,14 @@ pg-agent/
 │   ├── test_policy_scan.py         # offline pytest — derive_gaps + governance_fields (no Odoo)
 │   ├── test_policy_emit.py         # offline pytest — emit core (no Odoo)
 │   ├── test_numeric_verifier.py    # offline pytest — numeric verifier (no Odoo)
+│   ├── test_rls_model.py           # RQ9: offline calibration + SQL safety-lint for the Postgres-RLS plane
 │   └── test_metrics_and_consistency.py  # offline pytest — metrics + voting + TB.1 blind-spot (no Odoo)
+├── tools/                          # opt-in / Artifact-Evaluation harness (see REPRODUCE.md, `make`)
+│   ├── reproduce.sh                # one-command isolated reproduce + byte-diff (postgres:16 + odoo:19)
+│   ├── scale_scan.sh               # CE-corpus endemicity + soundness frontier (~11 apps)
+│   ├── rls_demo.sql                # RQ9: single-source-of-truth SQL — RLS gap (V-native) + pushdown fix (V-pushdown)
+│   ├── rls_probe.sh                # RQ9: `make rls` — runs rls_demo.sql on the isolated db, byte-diffs results/rls.csv
+│   └── llm_planner.py              # §10.1.1 Phase-1 real-LLM planner (HOST, opt-in, needs OPENAI_API_KEY)
 ├── config/
 │   ├── odoo.mock.conf              # PUBLIC mode (no private path)
 │   └── odoo.prod.conf              # PRIVATE/validation mode
@@ -269,6 +276,7 @@ make reproduce     # isolated postgres:16 + odoo:19; regenerate the core tables,
                    # gate on both schema variants -> "REPRODUCE: PASS"
 make reproduce-all # + RQ6/RQ7/RQ8 / agent-loop / LLM-replay drivers
 make scale         # CE-corpus endemicity + soundness frontier (installs ~11 CE apps; structural compare)
+make rls           # cross-engine generality: the SAME gap+fix on Postgres RLS (db-only, byte-diff) — §5.5/RQ9
 make clean         # tear down ONLY the isolated `pgagent-ae` stack
 ```
 

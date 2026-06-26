@@ -1,18 +1,20 @@
 # Artifact-Evaluation entry points for pg-agent / ERP-AuthZBench. See REPRODUCE.md.
 # Tiers:  test (offline, seconds)  <  reproduce (core, ~min)  <  reproduce-all  <  scale (CE apps, ~min).
-.PHONY: help test reproduce reproduce-all scale lint clean
+.PHONY: help test reproduce reproduce-all scale rls lint clean
 PY ?= python3
 
 # The offline unit tests (no Odoo, no LLM, no network) — mirrors CI static-checks.
 OFFLINE := test_output_validator test_sensitivity_registry test_policy_closure test_policy_scan \
            test_policy_emit test_pushdown_soundness test_policy_model test_numeric_verifier \
-           test_metrics_and_consistency test_redteam test_docrag test_agent_loop test_endemic
+           test_metrics_and_consistency test_redteam test_docrag test_agent_loop test_endemic \
+           test_rls_model
 
 help:
 	@echo "make test          # offline unit tests (no Docker/LLM/network) — seconds"
 	@echo "make reproduce     # regenerate + BYTE-DIFF the core paper tables, gate on both variants (Docker) — ~3-5 min"
 	@echo "make reproduce-all # + RQ6/RQ7/RQ8 / agent-loop / LLM-replay drivers"
 	@echo "make scale         # CE corpus endemicity + soundness frontier (installs ~11 CE apps) — ~10-20 min"
+	@echo "make rls           # cross-engine RLS gap+fix on Postgres (db-only, byte-diff) — §5.5/RQ9 — seconds"
 	@echo "make lint          # pre-commit: detect-secrets + raw-data regression gate"
 	@echo "make clean         # tear down the isolated pgagent-ae compose stack"
 
@@ -28,6 +30,9 @@ reproduce-all:
 
 scale:
 	@bash tools/scale_scan.sh
+
+rls:
+	@bash tools/rls_probe.sh
 
 lint:
 	@pre-commit run --all-files

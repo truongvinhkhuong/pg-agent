@@ -1,0 +1,5 @@
+variant,role,table_name,tenant,probe,row_count,cross_tenant_rows,verdict
+v-native,app_user,orders,ttv,parent-control,3,0,CONTROL-OK
+v-native,app_user,order_lines,ttv,child-direct,12,6,LEAK
+v-pushdown,app_user,orders,ttv,parent-control,3,0,CONTROL-OK
+v-pushdown,app_user,order_lines,ttv,child-direct,6,0,SAFE
