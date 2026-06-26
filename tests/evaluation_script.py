@@ -43,6 +43,7 @@ sys.path.insert(0, "data/erp_authzbench")
 from attacks import ATTACKS  # noqa: E402
 from adaptive import ADAPTIVE  # noqa: E402
 from redteam import generate as redteam_generate  # noqa: E402 (aliased: `generate` below is the seeder)
+import policy_model as pm_svc  # noqa: E402 (RQ7 ABAC/ReBAC formalization; aliased: driver below is `policy_model`)
 from generate_synthetic import generate  # noqa: E402
 from baselines import authorized  # noqa: E402
 
@@ -742,6 +743,95 @@ def redteam(env, outdir="results", write=True):
     GUARD_CONFIG["enforce_masking"] = True          # restore fully-defended defaults
     if denial_svc:
         denial_svc.DENIAL_CONFIG["enabled"] = True
+    return rows
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ABAC/ReBAC formalization (RQ7) — the guard's POLICY is an instance of a general
+# (ReBAC relation-path x ABAC attribute-predicate x subject-context) model.
+# Pure algebra in data/erp_authzbench/policy_model.py; this driver proves the live round-trip.
+# No LLM, no enforcement change (NOT wired into ci_gate).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The guard's POLICY, transcribed for the fixture-drift guard below. If pep_guard.POLICY changes,
+# this driver fails loudly AND tests/test_policy_model.py's fixture must be updated in lockstep.
+_RQ7_EXPECTED_POLICY = {
+    "pco.sale.order": {"team_path": "team_code", "company_path": "company_id", "owner_path": None},
+    "pco.sale.order.line": {"team_path": "order_id.team_code",
+                            "company_path": "order_id.company_id", "owner_path": "salesperson_id"},
+    "pco.sale.order.payment": {"team_path": "order_id.team_code",
+                               "company_path": "order_id.company_id", "owner_path": None},
+    "pco.sale.order.guarantee": {"team_path": "order_id.team_code",
+                                 "company_path": "order_id.company_id", "owner_path": None},
+}
+
+
+def policy_model(env, outdir="results"):
+    """RQ7: prove the formal `compile_policy` reproduces the guard's exact `_authz_domain` for every
+    persona x model (live round-trip), classify each grant (ReBAC hops x ABAC/RBAC context), and tie
+    team/company paths to the PCC-ERP BFS closure. Writes results/policy_model.csv. NO LLM, NO new
+    enforcement (not called by ci_gate)."""
+    companies, _ = seed(env)
+
+    # Fixture-drift guard: the offline test hard-codes POLICY (pep_guard imports odoo). Assert the
+    # live POLICY matches the RQ7 fixture so any drift fails here in CI, not silently.
+    assert POLICY == _RQ7_EXPECTED_POLICY, f"POLICY drift vs RQ7 fixture: {POLICY}"
+    grants = pm_svc.derive(POLICY)
+
+    # Live round-trip: the formal model must reproduce the guard's exact domain. ctx is sourced
+    # ENTIRELY from the guard object (same teams/companies/uid the guard itself uses) so the test
+    # exercises compile_policy's leaf-set/order/branching, not the value of env.companies.
+    checked = mismatches = 0
+    for key, spec in PERSONAS.items():
+        user = make_persona(env, key, companies)
+        guard = _persona_env(env, user, spec)["pg.agent.guard"]
+        ctx = {
+            "teams": guard._user_teams(),
+            "company_ids": guard.env.companies.ids,
+            "uid": guard.env.uid,
+            "own_only": guard._is_own_only(),
+        }
+        for model in POLICY:
+            expected = guard._authz_domain(model)
+            got = pm_svc.compile_policy(model, POLICY[model], ctx)
+            checked += 1
+            if got != expected:
+                mismatches += 1
+                print(f"  MISMATCH persona={key} model={model}: {got!r} != {expected!r}")
+
+    print("\n=== ERP-AuthZBench — ABAC/ReBAC policy formalization (RQ7) ===")
+    print(f"live round-trip  compile_policy == guard._authz_domain : "
+          f"{checked - mismatches}/{checked}  (personas x models)")
+    assert mismatches == 0, f"{mismatches} round-trip mismatches"
+
+    rows = []
+    print(f"{'model':<26}{'axis':<8}{'relation_path':<24}{'hops':<5}{'context_kind':<15}"
+          f"{'closure':<8}{'kind'}")
+    print("-" * 100)
+    for model in POLICY:
+        for g in grants[model]:
+            cm, cr = pm_svc.closure_matches(model, g), pm_svc.context_recognized(g)
+            rows.append({
+                "model": model, "axis": g["axis"], "relation_path": g["relation_path"],
+                "attribute": g["attribute"], "rebac_hops": g["hops"],
+                "definer_model": g["definer_model"], "subject_context": g["subject_context"],
+                "context_kind": g["context_kind"], "operator": g["operator"], "gate": g["gate"] or "",
+                "closure_matches": cm, "context_recognized": cr,
+                "kind": pm_svc.subject_context_kind(g),
+            })
+            print(f"{model:<26}{g['axis']:<8}{g['relation_path']:<24}{g['hops']:<5}"
+                  f"{g['context_kind']:<15}{str(cm):<8}{pm_svc.subject_context_kind(g)}")
+    print("-" * 100)
+    print("team = RBAC (group-membership) as a data predicate; company = tenant-ABAC; "
+          "owner = principal-ReBAC. team/company relation_path = PCC-ERP BFS closure.")
+    print("Formalizes pep_guard._authz_domain (NOT ground_truth_domain); NO LLM, NO new enforcement.\n")
+
+    os.makedirs(outdir, exist_ok=True)
+    _write_csv(os.path.join(outdir, "policy_model.csv"),
+               ["model", "axis", "relation_path", "attribute", "rebac_hops", "definer_model",
+                "subject_context", "context_kind", "operator", "gate",
+                "closure_matches", "context_recognized", "kind"], rows)
+    print(f"Wrote policy_model.csv ({len(rows)} rows) -> {outdir}/\n")
     return rows
 
 

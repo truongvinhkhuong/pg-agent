@@ -55,6 +55,7 @@ pg-agent/
 │   ├── policy_closure.py           # F10: pure closure-derivation core — derive_closures + derive_gaps (no Odoo)
 │   ├── domain_ast.py               # F10: pure ir.rule domain extractor (parse_domain + governance_fields)
 │   ├── policy_emit.py              # F10 Increment 2: pure emit core (POLICY + native ir.rule, no Odoo)
+│   ├── policy_model.py             # RQ7: pure ABAC×ReBAC formalization of POLICY (round-trips to _authz_domain)
 │   ├── integrity.py                # T4.3 integrity test set + wrong-formula set (symbolic gold) — RQ6
 │   ├── metrics.py                  # TB.3 governed-metrics registry (no Odoo)
 │   ├── consistency.py              # TB.2 pure execution-voting core (no Odoo)
@@ -273,6 +274,7 @@ run(env, denial_enabled=False)  # denial-rich baseline -> Existence-Inference Ra
 ablation(env)                   # defense-in-depth ladder
 adaptive(env)                   # adaptive probing -> residual-risk per family (T4.5)
 redteam(env)                    # automated red-team: enumerate the ORM-pivot grammar -> results/redteam.csv (T4.5+)
+policy_model(env)               # ABAC/ReBAC formalization: round-trip vs _authz_domain -> results/policy_model.csv (RQ7)
 integrity(env)                  # numeric verifier vs silently-wrong numbers -> results/integrity.csv (RQ6)
 integrity_formula(env)          # wrong-formula ladder: TB.1 -> +TB.3 -> +TB.2 -> results/integrity_formula.csv
 export_results(env)             # regenerate every paper table -> results/*.csv + results.json
@@ -367,6 +369,39 @@ reinstalling (`-u pco_core_mock`) to produce the V-rule row of the matrix —
 (committed reference copies live in [`results/vrule/`](results/vrule/)).
 
 On Google Colab: `scripts/colab_bootstrap.py` → `public_path()` (no token needed).
+
+### ABAC/ReBAC formalization (RQ7)
+
+The guard's bespoke per-model `POLICY` (`team_path` / `company_path` / `owner_path`) is, named
+explicitly, an **instance of a general subject-context model** — every grant is a
+**ReBAC relation-path** × an **ABAC attribute-predicate** × a **subject-context**.
+[`policy_model.py`](data/erp_authzbench/policy_model.py) (pure, no Odoo) makes this formal and
+**reuses the PCC-ERP machinery** it already rests on: `policy_closure._derive_path` (the relation
+closure) and `domain_ast._CONTEXT_NAMES` (the recognized ABAC context-tokens).
+
+`compile_policy` is a faithful transcription of `pep_guard._authz_domain` (leaves, order, fail-closed
+`None`, the belongs-to-no-team `[('id','=',0)]` short-circuit). The driver
+[`policy_model(env)`](tests/evaluation_script.py) proves the **live round-trip** — `compile_policy(...)
+== guard._authz_domain(model)` for **20/20 persona × model** combinations (Odoo 19, verified) — and
+emits the classification matrix ([`results/policy_model.csv`](results/policy_model.csv)):
+
+| axis | relation_path (hops) | subject-context | kind |
+|---|---|---|---|
+| team | `team_code` (0) / `order_id.team_code` (1) | group-membership | **RBAC** as a data predicate |
+| company | `company_id` (0) / `order_id.company_id` (1) | `company_ids` | **ABAC** tenant-set |
+| owner | `salesperson_id` (0) | `user.id` | **ReBAC** principal-id |
+
+Every team/company `relation_path` equals the **PCC-ERP BFS closure** (`closure_matches` ✓); the
+company and owner contexts are recognized ABAC tokens, while **team is RBAC** (resolved via
+`has_group`, its `group-membership` token is deliberately *not* in `_CONTEXT_NAMES`).
+
+**Honest framing.** This is **formalization, not new enforcement** — it names what the guard already
+does. It adds **zero** enforcement, ir.rule, or attack coverage; `ci_gate` and every benchmark number
+are untouched (the driver is not called by the gate). It formalizes only the team/company/owner
+predicates actually enforced — **no ABAC over state/date/region** (the generator does not populate
+those, so such a predicate would be vacuous). It mirrors the **guard** (`_authz_domain`), which
+intentionally differs from the leak oracle (`ground_truth_domain`, `= code` vs the guard's
+`in [codes]`). No LLM.
 
 ## Continuous integration
 

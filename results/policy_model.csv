@@ -1,0 +1,10 @@
+model,axis,relation_path,attribute,rebac_hops,definer_model,subject_context,context_kind,operator,gate,closure_matches,context_recognized,kind
+pco.sale.order,team,team_code,team_code,0,pco.sale.order,group-membership,membership-set,in,,True,False,rbac-group-membership
+pco.sale.order,company,company_id,company_id,0,pco.sale.order,company_ids,tenant-set,in,,True,True,abac-domain-context
+pco.sale.order.line,team,order_id.team_code,team_code,1,pco.sale.order,group-membership,membership-set,in,,True,False,rbac-group-membership
+pco.sale.order.line,company,order_id.company_id,company_id,1,pco.sale.order,company_ids,tenant-set,in,,True,True,abac-domain-context
+pco.sale.order.line,owner,salesperson_id,salesperson_id,0,pco.sale.order.line,user.id,principal-id,=,own_only,True,True,abac-domain-context
+pco.sale.order.payment,team,order_id.team_code,team_code,1,pco.sale.order,group-membership,membership-set,in,,True,False,rbac-group-membership
+pco.sale.order.payment,company,order_id.company_id,company_id,1,pco.sale.order,company_ids,tenant-set,in,,True,True,abac-domain-context
+pco.sale.order.guarantee,team,order_id.team_code,team_code,1,pco.sale.order,group-membership,membership-set,in,,True,False,rbac-group-membership
+pco.sale.order.guarantee,company,order_id.company_id,company_id,1,pco.sale.order,company_ids,tenant-set,in,,True,True,abac-domain-context
