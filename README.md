@@ -51,6 +51,7 @@ pg-agent/
 │   ├── generate_synthetic.py       # deterministic synthetic generator (no real data)
 │   ├── attacks.py                  # core suite (v3.1) + tagged extensions
 │   ├── adaptive.py                 # T4.5 adaptive-probing variant suite
+│   ├── redteam.py                  # T4.5+ automated red-team: deterministic ORM-pivot grammar generator (no LLM)
 │   ├── policy_closure.py           # F10: pure closure-derivation core — derive_closures + derive_gaps (no Odoo)
 │   ├── domain_ast.py               # F10: pure ir.rule domain extractor (parse_domain + governance_fields)
 │   ├── policy_emit.py              # F10 Increment 2: pure emit core (POLICY + native ir.rule, no Odoo)
@@ -174,6 +175,37 @@ the validator under test — so it is **documented, not hidden** ("report truthf
 eliminated"). The integrity counterpart (wrong-number variants) is now covered by the integrity set
 (T4.3) + numeric verifier (TB.1) — see below.
 
+### Automated red-team (T4.5+)
+
+[`redteam.py`](data/erp_authzbench/redteam.py) replaces the 14 hand-picked pivots with a
+**deterministic combinatorial generator** that *exhausts* a defined ORM-pivot grammar — a strict
+**super-set** of the manual families. Every generated variant is emitted in the `ADAPTIVE` schema and
+runs through the **same two-mode oracle** (undefended = the automatic meaningfulness filter; defended =
+the reported result), so [`ci_gate`](tests/evaluation_script.py) fails on **any** in-scope variant that
+survives the guard. Generated on the V-vuln schema (Odoo 19, verified):
+
+| family | enumerated | residual-leak / fired |
+|---|---|---|
+| `traversal-pivot` | child rows via every model × type-valid op over visible fields | **0/5** |
+| `field-extraction-pivot` | every confidential field × `search_read`/`read_group` path | **0/19** *(1 non-firing — empty seed value)* |
+| `aggregation-structure-pivot` | `search_count` per model + confidential-first mixed `groupby` | **0/4** |
+| `existence-pivot` | one denial probe per non-governed model (res.users/company/partner/groups/currency, ir.config_parameter) | **0/6** |
+| `answer-channel-paraphrase` | VN/EN spelled-out numbers + space/dash/dot/underscore-split codes | **6 `residual-known`** |
+
+**41 variants, 34 in-scope fired, residual-leak 0** (V-vuln); under V-rule more pivots go `non-firing`
+(the native `order_id.team_code` rule blocks line-traversal undefended) while the forgotten
+payment/guarantee siblings still fire and are held. The grammar's safety is proven **offline before the
+gate runs** by [`tests/test_redteam.py`](tests/test_redteam.py) — most importantly that every
+`expect_masked` equals the exact set the `sensitivity` registry would mask for the persona, so the gate
+can never red-fail on a legitimately-visible field.
+
+**Honest framing.** This is a *grammar generator*: **NO LLM** (structured enumeration, not an "AI
+red-team"); **not** random/fuzzing (fully deterministic — stable ids, sorted tuples); **exhaustive over
+the grammar** (which models the child-traversal / field-extraction / aggregation-structure /
+existence-inference surface), **not** over the universe of all attacks. A green gate ⇒ *no bypass at any
+enumerated grammar point and a regression that opens one fails CI*, **not** a proof the guard is
+universally correct.
+
 ### Integrity — numeric verifier (RQ6)
 
 The proposal's **applied / adopt-not-invent** pillar: the LLM must not do arithmetic — every number in
@@ -240,6 +272,7 @@ run(env)                        # uniform-denial ON  (defended)
 run(env, denial_enabled=False)  # denial-rich baseline -> Existence-Inference Rate 1/1
 ablation(env)                   # defense-in-depth ladder
 adaptive(env)                   # adaptive probing -> residual-risk per family (T4.5)
+redteam(env)                    # automated red-team: enumerate the ORM-pivot grammar -> results/redteam.csv (T4.5+)
 integrity(env)                  # numeric verifier vs silently-wrong numbers -> results/integrity.csv (RQ6)
 integrity_formula(env)          # wrong-formula ladder: TB.1 -> +TB.3 -> +TB.2 -> results/integrity_formula.csv
 export_results(env)             # regenerate every paper table -> results/*.csv + results.json
@@ -346,9 +379,11 @@ On Google Colab: `scripts/colab_bootstrap.py` → `public_path()` (no token need
   `ci_gate(env)` over **both schema variants** (V-vuln and V-rule). It fails unless the guard is
   clean (Unauthorized-Access = Data-Leakage = Existence-Inference = False-Block = 0), **no in-scope
   adaptive pivot survives the guard** (T4.5 residual-risk = 0; `residual-known` / `non-firing` never
-  fail the gate), **and** the benchmark is meaningful (canonical attacks and adaptive pivots actually
-  fire when undefended). This is the regression gate: any change that reopens a leak — on the
-  canonical path **or** any pivot path — turns CI red.
+  fail the gate), **no in-scope variant of the automated red-team grammar survives** (T4.5+ — the full
+  enumerated ORM-pivot grammar, a super-set of the manual pivots), **and** the benchmark is meaningful
+  (canonical attacks, adaptive pivots, and ≥12 generated red-team variants actually fire when
+  undefended). This is the regression gate: any change that reopens a leak — on the canonical path,
+  any hand-picked pivot, **or** any enumerated grammar point — turns CI red.
 
 ## Anti-leak
 

@@ -42,6 +42,7 @@ except Exception:  # pragma: no cover - allows static import outside Odoo
 sys.path.insert(0, "data/erp_authzbench")
 from attacks import ATTACKS  # noqa: E402
 from adaptive import ADAPTIVE  # noqa: E402
+from redteam import generate as redteam_generate  # noqa: E402 (aliased: `generate` below is the seeder)
 from generate_synthetic import generate  # noqa: E402
 from baselines import authorized  # noqa: E402
 
@@ -406,6 +407,18 @@ def ci_gate(env):
     if fired < 3:
         failures.append(f"adaptive not meaningful: only {fired} in-scope pivots fired")
 
+    # Automated red-team (T4.5+): the deterministically-enumerated ORM-pivot grammar (a strict
+    # super-set of ADAPTIVE). NO in-scope generated variant may survive the guard, and enough
+    # must actually fire to be meaningful. False-positive surface is zero by construction —
+    # test_redteam.py proves the grammar's clearance/type invariants in static-checks first.
+    rt = redteam(env, write=False)
+    rt_residual = [r["attack_id"] for r in rt if r["outcome"] == "RESIDUAL-LEAK"]
+    if rt_residual:
+        failures.append(f"red-team residual leak: {', '.join(rt_residual)}")
+    rt_fired = sum(1 for r in rt if r["in_scope"] and r["outcome"] in ("held", "RESIDUAL-LEAK"))
+    if rt_fired < 12:
+        failures.append(f"red-team not meaningful: only {rt_fired} in-scope variants fired")
+
     if failures:
         print("BENCH_GATE: FAIL")
         for f in failures:
@@ -598,6 +611,45 @@ def _classify(undefended, guarded, in_scope):
     return "residual-known" if guarded else "held"   # out-of-PEP-scope limitation
 
 
+def _run_variants(env, variants, companies):
+    """Classify each variant under the two-mode oracle -> list of row dicts (no printing).
+
+    Shared by `adaptive` (hand-curated ADAPTIVE) and `redteam` (the generated grammar).
+    The undefended (mode="user") run is the meaningfulness filter: `_classify` excludes any
+    non-firing variant from the residual-risk rate. The same dispatcher (`_adaptive_leaks`
+    -> `_attack_leaks`) handles all three shapes, so a generated variant needs no new logic.
+    """
+    rows = []
+    for v in variants:
+        _ku, undef = _adaptive_leaks(env, v, companies, "user")
+        kind, guarded = _adaptive_leaks(env, v, companies, "guard")
+        outcome = _classify(undef, guarded, v["in_scope"])
+        rows.append({
+            "family": v["family"], "vector": v["vector"], "attack_id": v["id"],
+            "in_scope": v["in_scope"],
+            "kind": kind, "undefended": _c(undef).lower(), "pg_agent": _c(guarded).lower(),
+            "outcome": outcome,
+        })
+    return rows
+
+
+def _family_agg(rows):
+    """family -> [residual_leak, fired, known, nonfiring], insertion-ordered."""
+    fam = {}
+    for r in rows:
+        agg = fam.setdefault(r["family"], [0, 0, 0, 0])
+        oc = r["outcome"]
+        if oc == "RESIDUAL-LEAK":
+            agg[0] += 1; agg[1] += 1
+        elif oc == "held":
+            agg[1] += 1
+        elif oc == "residual-known":
+            agg[2] += 1
+        else:                                       # non-firing
+            agg[3] += 1
+    return fam
+
+
 def adaptive(env):
     """Adaptive probing ladder: per-variant residual outcome + per-family rate.
 
@@ -614,30 +666,11 @@ def adaptive(env):
     print(f"{'family':<28}{'vector':<27}{'attack_id':<22}{'undef':<7}{'guard':<7}outcome")
     print("-" * 100)
 
-    out = []
-    # family -> [residual_leak, fired, known, nonfiring], insertion-ordered
-    fam = {}
-    for v in ADAPTIVE:
-        _ku, undef = _adaptive_leaks(env, v, companies, "user")
-        kind, guarded = _adaptive_leaks(env, v, companies, "guard")
-        outcome = _classify(undef, guarded, v["in_scope"])
-        out.append({
-            "family": v["family"], "vector": v["vector"], "attack_id": v["id"],
-            "in_scope": v["in_scope"],
-            "kind": kind, "undefended": _c(undef).lower(), "pg_agent": _c(guarded).lower(),
-            "outcome": outcome,
-        })
-        agg = fam.setdefault(v["family"], [0, 0, 0, 0])
-        if outcome == "RESIDUAL-LEAK":
-            agg[0] += 1; agg[1] += 1
-        elif outcome == "held":
-            agg[1] += 1
-        elif outcome == "residual-known":
-            agg[2] += 1
-        else:                                       # non-firing
-            agg[3] += 1
-        print(f"{v['family']:<28}{v['vector']:<27}{v['id']:<22}"
-              f"{_c(undef).lower():<7}{_c(guarded).lower():<7}{outcome}")
+    out = _run_variants(env, ADAPTIVE, companies)
+    fam = _family_agg(out)
+    for r in out:
+        print(f"{r['family']:<28}{r['vector']:<27}{r['attack_id']:<22}"
+              f"{r['undefended']:<7}{r['pg_agent']:<7}{r['outcome']}")
 
     print("-" * 100)
     print("Residual-Risk Rate per family (RESIDUAL-LEAK / fired):")
@@ -656,6 +689,60 @@ def adaptive(env):
     if denial_svc:
         denial_svc.DENIAL_CONFIG["enabled"] = True
     return out
+
+
+def redteam(env, outdir="results", write=True):
+    """Automated red-team: run the DETERMINISTICALLY-GENERATED grammar through the same
+    two-mode oracle as `adaptive` (no LLM — see data/erp_authzbench/redteam.py).
+
+    The grammar is a strict super-set of the hand-curated ADAPTIVE families (child-traversal
+    / field-extraction / aggregation-structure / existence-inference + the documented
+    answer-channel residual). Every in-scope variant must be `held` (residual 0); the
+    undefended run prunes non-firing cells. Prints the ladder + per-family rate and writes
+    `results/redteam.csv` (skipped when `write=False`, e.g. inside `ci_gate`).
+    """
+    GUARD_CONFIG["enforce_masking"] = True          # fully-defended
+    if denial_svc:
+        denial_svc.DENIAL_CONFIG["enabled"] = True
+    companies, _ = seed(env)
+
+    rows = _run_variants(env, redteam_generate(), companies)
+    fam = _family_agg(rows)
+
+    n = len(rows)
+    fired = sum(1 for r in rows if r["in_scope"] and r["outcome"] in ("held", "RESIDUAL-LEAK"))
+    held = sum(1 for r in rows if r["outcome"] == "held")
+    residual = [r["attack_id"] for r in rows if r["outcome"] == "RESIDUAL-LEAK"]
+    known = sum(1 for r in rows if r["outcome"] == "residual-known")
+    nonfiring = sum(1 for r in rows if r["outcome"] == "non-firing")
+
+    print("\n=== ERP-AuthZBench — automated red-team (combinatorial ORM-pivot grammar) ===")
+    print(f"generated={n}  in-scope-fired={fired}  held={held}  residual-leak={len(residual)}  "
+          f"residual-known={known}  non-firing={nonfiring}")
+    print("Residual-Risk Rate per family (RESIDUAL-LEAK / fired):")
+    for family, (leak, firedf, knownf, nonf) in fam.items():
+        extra = []
+        if knownf:
+            extra.append(f"{knownf} known-residual")
+        if nonf:
+            extra.append(f"{nonf} non-firing")
+        suffix = f"   ({', '.join(extra)})" if extra else ""
+        print(f"  {family:<28} {leak}/{firedf}{suffix}")
+    print(f"Grammar coverage: {len(fam)} families exercised, {n} enumerated variants. "
+          f"Deterministic enumeration, NO LLM; a green gate => no bypass at any enumerated "
+          f"grammar point (not a universal-correctness proof).\n")
+
+    if write:
+        os.makedirs(outdir, exist_ok=True)
+        _write_csv(os.path.join(outdir, "redteam.csv"),
+                   ["family", "vector", "attack_id", "in_scope", "kind",
+                    "undefended", "pg_agent", "outcome"], rows)
+        print(f"Wrote redteam.csv ({n} rows) -> {outdir}/\n")
+
+    GUARD_CONFIG["enforce_masking"] = True          # restore fully-defended defaults
+    if denial_svc:
+        denial_svc.DENIAL_CONFIG["enabled"] = True
+    return rows
 
 
 # ─────────────────────────────────────────────────────────────────────────────
