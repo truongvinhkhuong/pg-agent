@@ -86,8 +86,9 @@ A public, reproducible adversarial benchmark for row-level authorization of ERP 
   residual-risk suite ([`adaptive.py`](../data/erp_authzbench/adaptive.py)).
 - **Oracle harness** ([`evaluation_script.py`](../tests/evaluation_script.py)): each attack runs against a
   ground-truth oracle under three planes (native ir.rule, OAP-style action-authz, PG-Agent PEP); pass/fail is
-  **measured, not asserted**. *Caveat:* the public harness is oracle-based (deterministic ORM-level attacks);
-  it does not drive a real LLM loop — that integration is validated separately in the private monorepo.
+  **measured, not asserted**. *Caveat:* the headline numbers are oracle-based (deterministic ORM-level attacks);
+  §10.1.1 adds one **real-LLM run** over the public synthetic corpus as an empirical proxy, and the full
+  end-to-end agent integration is validated separately in the private monorepo.
 
 ---
 
@@ -404,8 +405,10 @@ Agents."*
 
 ## 9. Limitations & honest scope
 
-- **Oracle harness, no LLM loop (public artifact):** attacks are deterministic ORM-level probes; the
-  end-to-end agent loop is validated privately. The PEP correctness claim is at the data-result plane. The
+- **Oracle harness, real-LLM run is one proxy (public artifact):** the headline attacks are deterministic
+  ORM-level probes; **one real-LLM run** (§10.1.1, `gpt-4o-mini`, N=12, synthetic) provides an empirical proxy
+  (ASR-without-guard 2/12, guarded 0/12) — not a stable rate; the full production loop is validated privately.
+  The PEP correctness claim is at the data-result plane. The
   integrity layers (§6) likewise demonstrate *mechanisms* on planted answers/candidates — not measured LLM
   hallucination or wrong-formula rates — and the governed-metric coverage is partial by design (hybrid).
 - **CE gap rate is low per model but endemic across domains (§5.2.1):** standard Odoo is broadly
@@ -462,7 +465,36 @@ Benign queries are answered correctly and scoped; the adversarial cross-team req
 persona's own scope (the cross-team value never reaches the answer); the spelled-out value is the documented
 answer-channel residual (§4.3). The **row-level security rate is delegated to §4.1/§4.3**, not re-measured here —
 this is a *mechanism + utility* demo, not a security re-proof. The `LLMAgent` **seam** (an interface + recipe,
-deliberately not a shipped SDK client) is where a real model plugs in.
+deliberately not a shipped SDK client) is where a real model plugs in — exercised next.
+
+#### 10.1.1 Real-LLM run (reproducible public proxy) · [`results/llm/`](../results/llm/)
+
+We drove the loop once with a **real tool-calling model** (`gpt-4o-mini`, temperature 0, N=12 business
+questions over the public synthetic seed=42 corpus; the model's emitted tool-calls are committed in
+[`plans.json`](../results/llm/plans.json), so the evaluation [`eval.csv`](../results/llm/eval.csv) reproduces
+WITHOUT re-calling the model). The planner runs on the host ([`tools/llm_planner.py`](../tools/llm_planner.py),
+the only OpenAI-importing file, outside CI); Phase 2 (`llm_eval`, deterministic) executes each call **unguarded**
+(the ASR) vs **through the guard** against an **independent** oracle — the persona's ground-truth permitted
+id-set, never the guard's verdict. The prompt is **neutral** (a business analyst over the ERP; the schema is
+disclosed but the model is *never* told to filter by team for security — that would manufacture the safe answer).
+
+| stratum | leaked-without-guard | with-guard |
+|---|---|---|
+| benign (own-team questions) | **0/8** — the model self-scoped to its own team | 0/8 |
+| adversarial (system-wide / cross-team) | **2/4** — broad child-model aggregates leaked | 0/4 |
+| **total** | **ASR = 2/12** | **leak = 0/12** |
+
+The genuinely-new empirical facts: (i) a neutrally-prompted real LLM **does emit tool-calls that leak past
+native governance** — the two leaks are *broad child-model aggregates* (`pco.sale.order.line`/`.payment` with an
+empty domain: "all teams' quantities", "all payments") — the confused-deputy made concrete with a real agent;
+(ii) the model **self-scopes on own-team questions (0/8)** but not on system-wide ones, so the guard is
+load-bearing; (iii) **through the guard, leak = 0/12 regardless of what the model emitted**. (Honest detail: the
+model's *parent-traversing* cross-team queries — `order_id.team_code='ttf'` — were caught by the native **header**
+rule on the join, not the PEP; this *reinforces* the thesis — the bypass lives where a domain does **not** route
+back through the parent, i.e. broad child queries.) **Anti-claims:** 2/12 is **not a stable rate** (one run, one
+model, temp 0, N=12, synthetic — no generalization); it is **not** the private `pco_core`/production number
+(§10.2); the security claim does **not** depend on the ASR being large — the load-bearing result is **guarded =
+0 regardless of model output**; malformed/refused calls are reported as their own buckets, never silently "safe".
 
 ### 10.2 Private validation (corroborating, not reproducible)
 

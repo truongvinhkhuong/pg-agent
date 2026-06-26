@@ -286,6 +286,12 @@ export_results(env)             # regenerate every paper table -> results/*.csv 
 PY
 ```
 
+**Optional real-LLM run (reproducible public proxy, §10.1.1):** a real tool-calling model as the agent planner
+over the synthetic corpus + the guard. Phase 1 (host, spends quota): `pip install openai`, put `OPENAI_API_KEY`
+in `.env` (gitignored), `python tools/llm_planner.py` → `results/llm/plans.json`. Phase 2 (Odoo, deterministic):
+`llm_eval(env)` executes the committed plans unguarded (ASR) vs guarded (=0) → `results/llm/eval.csv`. NOT in CI
+(no LLM in CI); the committed `plans.json` reproduces Phase 2 without re-calling the model.
+
 `export_results(env)` is the one-command artifact: it writes `results/plane_comparison.csv`,
 `results/ablation.csv`, `results/adaptive_probing.csv`, `results/denial_channel.csv`, and
 `results/results.json` — the tables the paper cites (committed reference copies live in

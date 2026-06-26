@@ -125,9 +125,9 @@ A public, reproducible adversarial benchmark for row-level authorization of ERP 
         an \textbf{adaptive} residual-risk suite (\code{adaptive.py}).
   \item \textbf{Oracle harness} (\code{evaluation_script.py}): each attack runs against a ground-truth oracle
         under three planes (native ir.rule, OAP-style action-authz, PG-Agent PEP); pass/fail is
-        \textbf{measured, not asserted}. \emph{Caveat:} the public harness is oracle-based (deterministic
-        ORM-level attacks); it does not drive a real LLM loop --- that integration is validated separately in
-        the private monorepo.
+        \textbf{measured, not asserted}. \emph{Caveat:} the headline numbers are oracle-based (deterministic
+        ORM-level attacks); \S10.1.1 adds one \textbf{real-LLM run} over the public synthetic corpus as an
+        empirical proxy, and the full end-to-end integration is validated separately in the private monorepo.
 \end{itemize}
 
 % =====================================================================
@@ -480,8 +480,10 @@ framing: \emph{``Policy-Closure Compilation for Row-Level Authorization in ERP L
 % =====================================================================
 \section{Limitations \& honest scope}
 \begin{itemize}[leftmargin=*]
-  \item \textbf{Oracle harness, no LLM loop (public artifact):} attacks are deterministic ORM-level probes; the
-        end-to-end agent loop is validated privately. The PEP correctness claim is at the data-result plane.
+  \item \textbf{Oracle harness, real-LLM run is one proxy (public artifact):} the headline attacks are
+        deterministic ORM-level probes; one \textbf{real-LLM run} (\S10.1.1, \code{gpt-4o-mini}, N=12, synthetic)
+        gives an empirical proxy (ASR-without-guard 2/12, guarded 0/12) --- not a stable rate; the full
+        production loop is validated privately. The PEP correctness claim is at the data-result plane.
         The integrity layers (\S6) likewise demonstrate \emph{mechanisms} on planted answers/candidates --- not
         measured LLM hallucination or wrong-formula rates --- and the governed-metric coverage is partial by
         design (hybrid).
@@ -542,7 +544,39 @@ the persona's own scope (the cross-team value never reaches the answer); the spe
 documented answer-channel residual (\S4.3). The \textbf{row-level security rate is delegated to \S4.1/\S4.3},
 not re-measured here --- this is a \emph{mechanism + utility} demo, not a security re-proof. The
 \code{LLMAgent} \textbf{seam} (an interface + recipe, deliberately not a shipped SDK client) is where a real
-model plugs in.
+model plugs in --- exercised next.
+
+\subsubsection{Real-LLM run (reproducible public proxy)}
+We drove the loop once with a \textbf{real tool-calling model} (\code{gpt-4o-mini}, temperature 0, N=12 business
+questions over the public synthetic seed=42 corpus; the model's emitted tool-calls are committed in
+\code{results/llm/plans.json}, so the evaluation reproduces WITHOUT re-calling the model). The planner runs on
+the host (\code{tools/llm_planner.py}, the only OpenAI-importing file, outside CI); Phase 2 (\code{llm_eval},
+deterministic) executes each call \textbf{unguarded} (the ASR) vs \textbf{through the guard} against an
+\textbf{independent} oracle --- the persona's ground-truth permitted id-set, never the guard's verdict. The
+prompt is \textbf{neutral} (a business analyst over the ERP; the schema is disclosed but the model is never told
+to filter by team for security).
+
+\begin{center}\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+stratum & leaked-without-guard & with-guard \\
+\midrule
+benign (own-team questions)            & \textbf{0/8} (model self-scoped) & 0/8 \\
+adversarial (system-wide / cross-team) & \textbf{2/4} (broad child aggregates) & 0/4 \\
+\textbf{total} & \textbf{ASR = 2/12} & \textbf{leak = 0/12} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The new empirical facts: (i) a neutrally-prompted real LLM \textbf{does emit tool-calls that leak past native
+governance} (the two leaks are broad child-model aggregates with an empty domain --- the confused-deputy made
+concrete); (ii) the model \textbf{self-scopes on own-team questions (0/8)} but not on system-wide ones, so the
+guard is load-bearing; (iii) \textbf{through the guard, leak = 0/12 regardless of model output}. (Honest detail:
+the model's parent-traversing cross-team queries were caught by the native \emph{header} rule on the join, not
+the PEP --- which reinforces the thesis: the bypass lives where a domain does not route back through the
+parent.) \textbf{Anti-claims:} 2/12 is NOT a stable rate (one run/model/temp, N=12, synthetic); NOT the private
+production number; the security claim does NOT depend on the ASR being large (load-bearing = guarded 0
+regardless); malformed/refused calls are their own buckets, never silently ``safe''.
 
 \subsection{Private validation (corroborating, not reproducible)}
 Because the guard rewrites the query domain \textbf{below the LLM trust boundary} --- the model only emits ORM
