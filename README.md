@@ -56,6 +56,7 @@ pg-agent/
 │   ├── domain_ast.py               # F10: pure ir.rule domain extractor (parse_domain + governance_fields)
 │   ├── policy_emit.py              # F10 Increment 2: pure emit core (POLICY + native ir.rule, no Odoo)
 │   ├── policy_model.py             # RQ7: pure ABAC×ReBAC formalization of POLICY (round-trips to _authz_domain)
+│   ├── docrag.py                   # RQ8 L5: pure Doc-RAG corpus + deterministic lexical retriever (no LLM)
 │   ├── integrity.py                # T4.3 integrity test set + wrong-formula set (symbolic gold) — RQ6
 │   ├── metrics.py                  # TB.3 governed-metrics registry (no Odoo)
 │   ├── consistency.py              # TB.2 pure execution-voting core (no Odoo)
@@ -275,6 +276,7 @@ ablation(env)                   # defense-in-depth ladder
 adaptive(env)                   # adaptive probing -> residual-risk per family (T4.5)
 redteam(env)                    # automated red-team: enumerate the ORM-pivot grammar -> results/redteam.csv (T4.5+)
 policy_model(env)               # ABAC/ReBAC formalization: round-trip vs _authz_domain -> results/policy_model.csv (RQ7)
+docrag(env)                     # L5 Doc-RAG: retrieval-plane PEP (drop unauthorized + mask) -> results/docrag.csv (RQ8)
 integrity(env)                  # numeric verifier vs silently-wrong numbers -> results/integrity.csv (RQ6)
 integrity_formula(env)          # wrong-formula ladder: TB.1 -> +TB.3 -> +TB.2 -> results/integrity_formula.csv
 export_results(env)             # regenerate every paper table -> results/*.csv + results.json
@@ -402,6 +404,42 @@ predicates actually enforced — **no ABAC over state/date/region** (the generat
 those, so such a predicate would be vacuous). It mirrors the **guard** (`_authz_domain`), which
 intentionally differs from the leak oracle (`ground_truth_domain`, `= code` vs the guard's
 `in [codes]`). No LLM.
+
+### L5 Doc-RAG retrieval plane (RQ8)
+
+The PEP extends from the structured-data plane to a **retrieval** plane. A RAG agent retrieves
+document **chunks** (derived from records) to answer a question; the confused-deputy is the
+RETRIEVER, which ranks the most *relevant* chunks regardless of whether the persona may read the
+source record. [`docrag.py`](data/erp_authzbench/docrag.py) (pure, no Odoo) is a **deterministic
+lexical retriever** + the chunk template; the enforcement is
+[`guard.guarded_retrieve`](addons/pg_agent_guard/models/pep_guard.py) — it routes each retrieved
+chunk's provenance back through the SAME data-plane guard (`guarded_search_read`): a chunk whose
+source record is not row-authorized is **dropped**, and a survivor is delivered only **re-rendered
+from the clearance-masked source**.
+
+The driver [`docrag(env)`](tests/evaluation_script.py) measures retrieval leak UNDEFENDED vs guarded
+against **independent oracles** — the full row-authz permitted set (unauthorized delivery) and the
+SUDO cleartext value (`output_validator` as a presence scanner, never the guard's own verdict)
+([`results/docrag.csv`](results/docrag.csv), Odoo 19, verified):
+
+| attack | undef unauth/confid | guarded | note |
+|---|---|---|---|
+| cross-team-direct (`nhóm ttf` query) | 8/8 | **0/0** | every cross-team source row dropped |
+| cross-team-incidental (generic query) | 8/12 | **0/0** | top-k spans teams; the ranker can't enforce team, the PEP does |
+| confidential (own-team) | 4/8 | **0/0** | authorized rows survive, confidential spans masked |
+| utility / false-block | 4/8 | **0/0** | same-team chunks survive, public `name` verbatim |
+
+**undefended leaks 60 → guarded unauthorized 0, confidential 0, false-block 0.**
+
+**Honest framing.** **NO LLM** — a deterministic lexical ranker stands in for the embedding retriever;
+the security property (re-check provenance + mask at delivery) is **independent of the ranker**.
+Threat model: the index holds **cleartext** and the ranker is **untrusted** — the PEP gates
+**delivery, not the index** (so rank order can be influenced by confidential content even though that
+content is never delivered: a named residual, not a value leak). Chunks here are **structured**
+(field provenance), so masking is structural and avoids the output-validator paraphrase residual; a
+true unstructured free-text chunk has no provenance, falls back to content-scanning, and inherits
+that residual — carried as one `in_scope=False` free-prose probe. **Must NOT claim** a real-LLM/
+embedding RAG rate, a secured index/ranker, or universal correctness.
 
 ## Continuous integration
 

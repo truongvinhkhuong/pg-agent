@@ -199,6 +199,35 @@ class PgAgentGuard(models.AbstractModel):
         denial.pad_latency(t0)
         return rows
 
+    def guarded_retrieve(self, candidates):
+        """Retrieval-plane PEP (L5 / RQ8): re-validate retrieved-chunk PROVENANCE at delivery.
+
+        The retriever (ranking) is UNTRUSTED and lives OUTSIDE this boundary; it may surface a chunk
+        from any source record. This re-routes each candidate's provenance through the SAME data-plane
+        guard (`guarded_search_read`): a chunk whose source record is not row-authorized is DROPPED,
+        and a surviving chunk's source is returned with confidential fields MASKED to the user's
+        clearance — so the caller can only ever re-render from what the persona may read.
+
+        `candidates` = [{"model", "record_id", "fields"}]. Returns
+        [{"model", "record_id", "record"}] for ALLOWED candidates only (`record` = the masked field
+        dict). Reuses `guarded_search_read` — no new enforcement logic. (Gates DELIVERY, not the index.)
+        """
+        by_model = {}
+        for c in candidates:
+            by_model.setdefault(c["model"], {"ids": [], "fields": set()})
+            by_model[c["model"]]["ids"].append(c["record_id"])
+            by_model[c["model"]]["fields"].update(c["fields"])
+        allowed = {}
+        for model, spec in by_model.items():
+            rows = self.guarded_search_read(model, [("id", "in", spec["ids"])], sorted(spec["fields"]))
+            allowed[model] = {r["id"]: r for r in rows}
+        out = []
+        for c in candidates:
+            rec = allowed.get(c["model"], {}).get(c["record_id"])
+            if rec is not None:
+                out.append({"model": c["model"], "record_id": c["record_id"], "record": rec})
+        return out
+
     def guarded_search_count(self, model, domain=None):
         t0 = time.monotonic()
         dec = self._guard(model, "search_count", domain)

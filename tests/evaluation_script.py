@@ -44,6 +44,7 @@ from attacks import ATTACKS  # noqa: E402
 from adaptive import ADAPTIVE  # noqa: E402
 from redteam import generate as redteam_generate  # noqa: E402 (aliased: `generate` below is the seeder)
 import policy_model as pm_svc  # noqa: E402 (RQ7 ABAC/ReBAC formalization; aliased: driver below is `policy_model`)
+import docrag as docrag_svc  # noqa: E402 (L5 Doc-RAG retrieval plane RQ8; aliased: driver below is `docrag`)
 from generate_synthetic import generate  # noqa: E402
 from baselines import authorized  # noqa: E402
 
@@ -832,6 +833,140 @@ def policy_model(env, outdir="results"):
                 "subject_context", "context_kind", "operator", "gate",
                 "closure_matches", "context_recognized", "kind"], rows)
     print(f"Wrote policy_model.csv ({len(rows)} rows) -> {outdir}/\n")
+    return rows
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# L5 Doc-RAG retrieval plane (RQ8) — the data-plane PEP extends to retrieval.
+# Pure retriever/corpus in data/erp_authzbench/docrag.py; the PEP is guard.guarded_retrieve
+# (reuses guarded_search_read). Oracles are INDEPENDENT (provenance id+team for cross-team; SUDO
+# cleartext value via ov_svc for confidential) — never the guard's own verdict. NO LLM.
+# Self-asserts (like policy_model); NOT wired into ci_gate.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _docrag_confidential_present(text, sudo_vals):
+    """Independent presence oracle: is any SUDO cleartext confidential value in `text`? Uses the
+    output validator as a SCANNER (redact=False) — true presence, not the guard's verdict."""
+    res = ov_svc.validate_answer(text, [sudo_vals["customer_name"], sudo_vals["amount_total"]],
+                                 redact=False)
+    return res.leaked
+
+
+def docrag(env, outdir="results"):
+    """L5 Doc-RAG (RQ8): a retrieved chunk is delivered ONLY re-rendered from a row-authorized,
+    clearance-masked source. Measures retrieval leak (unauthorized source-row delivery + confidential
+    span delivery) UNDEFENDED vs through `guard.guarded_retrieve`, against independent oracles (the
+    FULL row-authz permitted set + SUDO cleartext values). Self-asserts guarded leak 0 + false-block 0
+    + meaningfulness. Writes results/docrag.csv. NO LLM."""
+    GUARD_CONFIG["enforce_masking"] = True
+    if denial_svc:
+        denial_svc.DENIAL_CONFIG["enabled"] = True
+    companies, _ = seed(env)
+
+    model = "pco.sale.order"
+    fields = list(docrag_svc.CHUNK_FIELDS[model])
+    # Corpus from the SUDO (cleartext) records — the cleartext-index assumption (the PEP gates
+    # DELIVERY, not the index). `meta[id]` carries provenance + the independent confidential oracle.
+    orders = env[model].sudo().search([], order="id")
+    corpus, meta = [], {}
+    for o in orders:
+        rec = {"name": o.name, "team_code": o.team_code, "customer_name": o.customer_name,
+               "amount_total": int(o.amount_total or 0)}
+        text = docrag_svc.render_chunk(model, rec)
+        corpus.append({"record_id": o.id, "source_team": o.team_code, "text": text})
+        meta[o.id] = {"source_team": o.team_code, "name": o.name,
+                      "customer_name": o.customer_name, "amount_total": int(o.amount_total or 0)}
+
+    print("\n=== ERP-AuthZBench — L5 Doc-RAG retrieval plane (RQ8) ===")
+    print(f"corpus={len(corpus)} chunks (1/order); deterministic lexical retriever, NO LLM. Oracles: "
+          f"FULL row-authz permitted set (unauthorized delivery), SUDO cleartext value (confidential).")
+    print(f"{'attack':<26}{'kind':<22}{'undef ua/cf':<14}{'guard ua/cf':<14}{'false_block':<12}scope")
+    print("-" * 100)
+
+    rows = []
+    for atk in docrag_svc.DOCRAG_ATTACKS:
+        spec = PERSONAS[atk["persona"]]
+        user = make_persona(env, atk["persona"], companies)
+        guard = _persona_env(env, user, spec)["pg.agent.guard"]
+
+        if atk["kind"] == "free-prose-residual":
+            # Unstructured prose has NO field provenance -> the guard's only recourse is the output
+            # validator, which misses a FULLY spelled-out number (documented residual; in_scope=False).
+            prose = "Báo cáo nội bộ: tổng giá trị hợp đồng cross-team khoảng năm mươi triệu đồng."
+            clean = guard.guarded_validate_answer(prose, [50000000]).clean_text
+            residual = "năm mươi triệu" in clean.lower()           # value survives in spelled form
+            rows.append({"attack": atk["id"], "kind": atk["kind"], "query": atk["query"], "k": atk["k"],
+                         "n_cands": 1, "undef_unauth": 0, "undef_confidential": 1,
+                         "guarded_unauth": 0, "guarded_confidential": int(residual),
+                         "false_block": 0, "in_scope": False})
+            print(f"{atk['id']:<26}{atk['kind']:<22}{'0/1':<14}"
+                  f"{('0/%d' % int(residual)):<14}{'0':<12}out (residual)")
+            continue
+
+        # The persona's TRUE permitted set = the FULL row-authz the guard enforces (team AND company;
+        # owner_path is None for the order model). Built independently via sudo — NOT the guard's verdict.
+        pdom = []
+        if spec.get("team"):
+            pdom.append(("team_code", "=", spec["team"]))
+        pdom.append(("company_id", "in", user.company_ids.ids))
+        permitted = set(env[model].sudo().search(pdom).ids)
+
+        cands = docrag_svc.lexical_rank(atk["query"], corpus, atk["k"])
+
+        # UNDEFENDED: deliver every candidate cleartext. Leak = unauthorized source row delivered
+        # (record not in `permitted`) OR a confidential cleartext value present.
+        undef_ua = sum(1 for c in cands if c["record_id"] not in permitted)
+        undef_cf = sum(1 for c in cands if _docrag_confidential_present(c["text"], meta[c["record_id"]]))
+
+        # GUARDED: re-validate provenance through the PEP; re-render from the MASKED record.
+        gcands = [{"model": model, "record_id": c["record_id"], "fields": fields} for c in cands]
+        secure = guard.guarded_retrieve(gcands)
+        secure_by_id = {s["record_id"]: s for s in secure}
+        guard_ua = sum(1 for s in secure if s["record_id"] not in permitted)         # unauthorized delivered
+        guard_cf = sum(1 for s in secure
+                       if _docrag_confidential_present(docrag_svc.render_chunk(model, s["record"]),
+                                                       meta[s["record_id"]]))
+
+        # false-block: an AUTHORIZED candidate dropped, OR a delivered authorized chunk's public
+        # `name` over-redacted.
+        false_block = 0
+        for c in cands:
+            if c["record_id"] not in permitted:
+                continue
+            s = secure_by_id.get(c["record_id"])
+            if s is None or s["record"].get("name") != meta[c["record_id"]]["name"]:
+                false_block += 1
+
+        rows.append({"attack": atk["id"], "kind": atk["kind"], "query": atk["query"], "k": atk["k"],
+                     "n_cands": len(cands), "undef_unauth": undef_ua, "undef_confidential": undef_cf,
+                     "guarded_unauth": guard_ua, "guarded_confidential": guard_cf,
+                     "false_block": false_block, "in_scope": True})
+        print(f"{atk['id']:<26}{atk['kind']:<22}{('%d/%d' % (undef_ua, undef_cf)):<14}"
+              f"{('%d/%d' % (guard_ua, guard_cf)):<14}{false_block:<12}in")
+
+    print("-" * 100)
+    insc = [r for r in rows if r["in_scope"]]
+    undef_leaks = sum(r["undef_unauth"] + r["undef_confidential"] for r in insc)
+    g_ua = sum(r["guarded_unauth"] for r in insc)
+    g_cf = sum(r["guarded_confidential"] for r in insc)
+    fb = sum(r["false_block"] for r in insc)
+    print(f"in-scope: undefended-leaks={undef_leaks}  guarded unauthorized={g_ua}  "
+          f"guarded confidential={g_cf}  false-block={fb}")
+    print("A chunk is delivered only re-rendered from a row-authorized, clearance-masked source. "
+          "Free-prose (no provenance) inherits the output-validator paraphrase residual (out-of-scope).\n")
+
+    # Self-asserts (mirror policy_model): the new code fails loudly if the guard ever leaks via
+    # retrieval, without touching the headline ci_gate.
+    assert g_ua == 0, f"retrieval unauthorized-row delivery: {g_ua}"
+    assert g_cf == 0, f"retrieval confidential leak: {g_cf}"
+    assert fb == 0, f"retrieval false-block: {fb}"
+    assert undef_leaks >= 8, f"docrag not meaningful: only {undef_leaks} undefended leaks"
+
+    os.makedirs(outdir, exist_ok=True)
+    _write_csv(os.path.join(outdir, "docrag.csv"),
+               ["attack", "kind", "query", "k", "n_cands", "undef_unauth", "undef_confidential",
+                "guarded_unauth", "guarded_confidential", "false_block", "in_scope"], rows)
+    print(f"Wrote docrag.csv ({len(rows)} rows) -> {outdir}/\n")
     return rows
 
 
