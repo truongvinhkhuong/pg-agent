@@ -22,7 +22,11 @@ row-level closures from the ORM relation graph + existing record rules, emits th
 runtime-verifies gap closure — validated on the mock end-to-end and on vanilla Odoo CE `sale`+`account`+`stock`.
 On the orthogonal reliability axis (RQ6) we adopt a three-layer **integrity** stack (numeric verifier + governed
 metrics + execution-guided self-consistency) that drives the silently-wrong-number rate to zero and catches
-correct-arithmetic-with-the-wrong-formula — framed as applied, not novelty.
+correct-arithmetic-with-the-wrong-formula — framed as applied, not novelty. We additionally (iv) regression-gate
+the residual-risk surface with a deterministic, LLM-free **red-team grammar** that exhausts the ORM-pivot space
+(T4.5+); (v) **formalize** the bespoke POLICY as an instance of a general **ABAC×ReBAC** subject-context model
+whose compiler reproduces the guard's exact authorization domain (RQ7); and (vi) extend the PEP to a **Doc-RAG
+retrieval plane** that delivers chunks only re-rendered from row-authorized, clearance-masked sources (RQ8).
 
 The contribution is scoped honestly to **applied security + benchmark + reference implementation** for an
 under-served setting (ERP record-rule governance that is incomplete on child models), not to a novel
@@ -143,6 +147,15 @@ existence-pivot 0/2 (all fire undefended → not vacuous). The `answer-channel-p
 scope** and reports **2 documented residuals** (a confidential value spelled in words / a code split by spaces
 evades the output validator's regex) — measured by an independent ground-truth oracle, reported not hidden.
 
+**Automated red-team (T4.5+)** · [`redteam.csv`](../results/redteam.csv). The 14 hand-picked pivots are a subset
+of a **deterministically-enumerated ORM-pivot grammar** (`redteam.py`) — a strict super-set across the five
+families, expanded over the type-safe model × op × field axis to **41 variants**. Run through the same two-mode
+oracle (undefended = the automatic meaningfulness filter that prunes non-firing cells), every in-scope variant
+**holds — residual-leak 0/41**: 34 fire on V-vuln; under V-rule more go `non-firing` (the native rule blocks
+line-traversal) while the forgotten payment/guarantee siblings still fire and hold. `ci_gate` fails on **any**
+in-scope grammar point that survives the guard. Honest: exhaustive over the *grammar* (a modeled threat surface),
+**not** the universe of attacks; deterministic enumeration, **NO LLM** — a structured fuzzer, not an "AI red-team".
+
 ### 4.4 Denial channel · [`denial_channel.csv`](../results/denial_channel.csv)
 
 Existence-Inference Rate: **1/1 with uniform-denial OFF** (denial-rich baseline leaks existence) → **0/1 with
@@ -160,8 +173,9 @@ pivots stay `held`. **PG-Agent is safe/held in both variants** — point fixes d
 
 CI (`.github/workflows/ci.yml`) installs the addons in **Odoo 19 + Postgres** and runs `ci_gate(env)` over
 **both variants**; it fails unless Unauthorized = Data-Leakage = Existence-Inference = False-Block = 0, **no
-in-scope adaptive RESIDUAL-LEAK**, and the benchmark is meaningful (attacks fire undefended). Any change that
-reopens a leak — canonical path or pivot path — turns CI red.
+in-scope adaptive RESIDUAL-LEAK**, **no in-scope variant of the automated red-team grammar survives** (§4.3),
+and the benchmark is meaningful (attacks fire undefended). Any change that reopens a leak — canonical path, a
+hand-picked pivot, **or** any enumerated grammar point — turns CI red.
 
 ---
 
@@ -220,6 +234,19 @@ Manual-burden (secondary, honest): 11 relational closures auto-derived vs the 9 
   complex parent domain into one child leaf** (not sound in general) — that 1/5 is the real soundness frontier,
   surfaced by `parse_domain`, not hidden.
 
+### 5.4 ABAC/ReBAC formalization (RQ7) · [`results/policy_model.csv`](../results/policy_model.csv)
+
+The bespoke per-model POLICY is, named explicitly, an **instance of a general subject-context model**: each grant
+= a **ReBAC relation-path** (the M2O closure to the field's defining model — the same `_derive_path` BFS as §5)
+× an **ABAC attribute-predicate** (terminal field + operator + context RHS) × a **subject-context** of one of
+three kinds {group-membership, tenant-set, principal-id}. `policy_model.py` (pure) `compile_policy` is a faithful
+transcription of the guard's `_authz_domain`; a live round-trip proves **`compile_policy == guard._authz_domain`
+for 20/20 persona × model** (Odoo 19). Every team/company `relation_path` equals the PCC-ERP BFS closure (hops 0
+on the header, 1 on a child); the company/owner contexts are recognized ABAC tokens while **team is RBAC**
+(group-membership, resolved via `has_group` — deliberately not a domain context). **Honest: formalization, not
+new enforcement** — it names what the guard already does (zero new ir.rule/attack; `ci_gate` untouched), and
+ABAC over un-populated attributes (state/region — vacuous on the synthetic data) is deliberately omitted.
+
 ---
 
 ## 6. Integrity — RQ6 (applied / adopt-not-invent)
@@ -273,7 +300,37 @@ metric *definition*.
 
 ---
 
-## 7. Related work & positioning
+## 7. Doc-RAG retrieval plane (RQ8)
+
+The PEP extends from the structured-data plane to a **retrieval** plane. A RAG agent retrieves document **chunks**
+(derived from records) to answer a question; the confused-deputy is the **retriever**, which ranks the most
+*relevant* chunks regardless of whether the persona may read the source record. The mechanism reuses the
+data-plane guard: `guard.guarded_retrieve` routes each retrieved chunk's provenance back through
+`guarded_search_read` — a chunk whose source record is **not row-authorized is dropped**, and a survivor is
+delivered only **re-rendered from the clearance-masked source**. A deterministic lexical (term-overlap) retriever
+stands in for the embedding ranker; the security property is **independent of the ranker**. No LLM.
+
+Oracles are **independent** of the guard's verdict: the full row-authz permitted set (unauthorized-row delivery)
+and the SUDO cleartext value (`output_validator` as a presence scanner, not the guard's own verdict).
+· [`results/docrag.csv`](../results/docrag.csv):
+
+| attack | undefended (unauth / confid) | guarded |
+|---|---|---|
+| cross-team-direct (`nhóm ttf` query) | 8/8 | **0/0** |
+| cross-team-incidental (generic query, top-k spans teams) | 8/12 | **0/0** |
+| confidential (own-team, spans masked) | 4/8 | **0/0** |
+| utility / false-block | 4/8 | **0/0** |
+
+**Undefended leaks 60 → guarded unauthorized 0, confidential 0, false-block 0** (Odoo 19); `ci_gate` unaffected
+(the driver self-asserts, like §5.4, rather than gating). **Honest scope:** the PEP gates **delivery, not the
+index** — cleartext indexing is an assumption and rank order can be influenced by confidential content (a named
+residual, not a value leak). Structural masking avoids the output-validator paraphrase residual *because* chunks
+are provenance-tracked; true unstructured prose has no provenance, falls back to content-scanning, and inherits
+that residual (carried as one out-of-scope free-prose probe). **No real-LLM / embedding RAG rate is claimed.**
+
+---
+
+## 8. Related work & positioning
 
 - **Governed + secure NL analytics (prior art for the "unified" pillar):** Cortex Analyst, Databricks Genie,
   MS Fabric Data Agent (industry); SAFEFLOW (IFC, integrity+confidentiality). All **assume complete/inherited
@@ -295,7 +352,7 @@ Authorization in ERP LLM Agents."*
 
 ---
 
-## 8. Limitations & honest scope
+## 9. Limitations & honest scope
 
 - **Oracle harness, no LLM loop (public artifact):** attacks are deterministic ORM-level probes; the
   end-to-end agent loop is validated privately. The PEP correctness claim is at the data-result plane. The
@@ -307,15 +364,23 @@ Authorization in ERP LLM Agents."*
   (1/5 on CE); complex domains (OR/parent_of/multi-field) are flagged manual-review — sound pushdown of
   arbitrary domains is the research frontier, not claimed.
 - **Owner axis** is a local opt-in field, out of relational-closure scope by construction.
+- **Red-team is grammar-exhaustive, not exhaustive (§4.3):** the automated red-team enumerates a *defined*
+  ORM-pivot grammar (a modeled threat surface) deterministically and without an LLM; a green gate means no bypass
+  at any enumerated point, not a universal-correctness proof.
+- **RQ7 is formalization, not enforcement (§5.4):** it names the team/company/owner predicates the guard already
+  enforces (no new ir.rule/attack); ABAC over un-populated attributes would be vacuous and is omitted.
+- **RQ8 gates delivery, not the index (§7):** the retrieval PEP re-checks provenance at delivery; the cleartext
+  index and rank-order are named residuals, structural masking depends on field provenance (unstructured prose
+  inherits the paraphrase residual), and no real-LLM / embedding RAG rate is claimed.
 - **Read-scoped:** write/create/unlink, prompt-injection elimination, and infrastructure threats are out of
   scope; prompt injection is "reduced + measured", not "eliminated".
 
 ---
 
-## 9. Reproducibility
+## 10. Reproducibility
 
 - Offline (no Odoo): the `tests/test_*.py` suite (output-validator, sensitivity, policy-closure, policy-scan,
-  policy-emit, numeric-verifier, metrics-and-consistency) — run in CI static-checks.
+  policy-emit, policy-model, numeric-verifier, metrics-and-consistency, redteam, docrag) — run in CI static-checks.
 - Full benchmark + linter + emit: an Odoo 19 shell over the mock (V-vuln/V-rule) and over Odoo CE
   `sale,account,stock`; see [`README.md`](../README.md) for the exact `odoo shell` recipes. All runs in this
   report were produced in **isolated ephemeral Odoo 19 + Postgres containers**; committed reference copies live
@@ -323,7 +388,7 @@ Authorization in ERP LLM Agents."*
 
 ---
 
-## 10. Conclusion
+## 11. Conclusion
 
 ERP LLM agents leak rows at the data-result plane when record-rule governance is incomplete on child models —
 a gap the warehouse-native and action-plane lines of work do not close for ERP. ERP-AuthZBench measures it,
@@ -332,5 +397,10 @@ PCC-ERP shows the per-model closures are *derivable*: it reconstructs the guard 
 and surfaces 5 genuine relational-traversal gaps in vanilla Odoo CE, emitting sound native rules exactly where
 the parent rule is pushdownable. On the reliability axis (RQ6), the three-layer integrity stack drives the
 silently-wrong-number rate to zero and closes the numeric verifier's wrong-formula blind spot (TB.1 0/6 → +TB.3
-4/6 → +TB.2 6/6) via deterministic governed metrics + execution-voting. The work is applied-security + benchmark
-+ reference implementation for an under-served setting, with an explicitly honest soundness frontier.
+4/6 → +TB.2 6/6) via deterministic governed metrics + execution-voting. Beyond the canonical results, the
+residual-risk surface is regression-gated by an exhaustive ORM-pivot **red-team grammar** (residual-leak 0/41);
+the bespoke POLICY is shown to be an instance of a general **ABAC×ReBAC** subject-context model whose formal
+compiler reproduces the guard's exact domain (RQ7, 20/20); and the PEP extends to a **Doc-RAG retrieval plane**
+that delivers chunks only re-rendered from row-authorized, clearance-masked sources (RQ8, guarded leak 0). The
+work is applied-security + benchmark + reference implementation for an under-served setting, with an explicitly
+honest soundness frontier.
