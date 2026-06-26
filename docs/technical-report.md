@@ -20,6 +20,9 @@ LLM agents; (ii) **PG-Agent**, a model-agnostic data-result-plane Policy Enforce
 clean on every benchmark class; and (iii) **PCC-ERP**, a policy-closure compiler that *derives* the per-model
 row-level closures from the ORM relation graph + existing record rules, emits them as enforceable policy, and
 runtime-verifies gap closure — validated on the mock end-to-end and on vanilla Odoo CE `sale`+`account`+`stock`.
+On the orthogonal reliability axis (RQ6) we adopt a three-layer **integrity** stack (numeric verifier + governed
+metrics + execution-guided self-consistency) that drives the silently-wrong-number rate to zero and catches
+correct-arithmetic-with-the-wrong-formula — framed as applied, not novelty.
 
 The contribution is scoped honestly to **applied security + benchmark + reference implementation** for an
 under-served setting (ERP record-rule governance that is incomplete on child models), not to a novel
@@ -219,7 +222,58 @@ Manual-burden (secondary, honest): 11 relational closures auto-derived vs the 9 
 
 ---
 
-## 6. Related work & positioning
+## 6. Integrity — RQ6 (applied / adopt-not-invent)
+
+A reliability threat orthogonal to authorization: an LLM agent that retrieves the *right* rows can still report a
+*silently-wrong number* (a hallucinated or mis-derived value that looks plausible). We adopt the warehouse-native
+principle — **the LLM must not do arithmetic; every number binds to an execution result** — down to ERP. Framed
+explicitly as applied (not a research-novelty claim). No LLM in the public artifact, so (as for authz) the demos
+are deterministic: planted answers + a trusted symbolic gold; what is demonstrated is the *mechanism*, with the
+real-LLM rate validated privately.
+
+Three complementary layers (TB.1/TB.2/TB.3), a strict division of labor:
+
+### 6.1 Numeric verifier (TB.1) · [`results/integrity.csv`](../results/integrity.csv)
+
+A pure, offline-tested scanner: each answer number must bind to the governed execution table or a **bounded
+derivation** of it (sum / pairwise-diff / ratio% / pct-change / share-of-total; magnitude + rounding tolerance;
+VN/EN decimals). 6 questions across **5 kinds** (aggregation / ratio / growth-% / period-comparison / multi-step),
+each with a symbolic gold.
+
+| metric | result |
+|---|---|
+| Silently-Wrong-Number Rate | raw text-to-ORM **6/6** (wrong present) → **+verifier 0/6** (slips through) |
+| false-flag rate on correct/derived answers | **0/6** (passes growth-%, ratios, negative diffs) |
+| coverage | **5/5 kinds** |
+
+TB.1 catches numbers **not derivable** from the data (fabricated / cross-data). Its **blind spot**:
+*correct-arithmetic-with-the-wrong-formula* — a number that *is* a valid derivation (so it binds) yet answers a
+*different* question (wrong rows/field/agg/dimension).
+
+### 6.2 Governed metrics (TB.3) + execution-guided self-consistency (TB.2) · [`results/integrity_formula.csv`](../results/integrity_formula.csv)
+
+A governed-metric registry pins `(model, measure, agg, dimension, filter)`; the engine computes each
+**through the guard** (the authz domain pins the rows, the registry pins measure+agg → the right formula over the
+right rows by construction, so a covered question *cannot* be wrong-formula). Self-consistency votes over executed
+candidates (strict majority; minority outvoted; no-majority refused). On 6 wrong-formula questions whose wrong
+value **binds under TB.1** (it equals an *identity* / *pairwise-diff* / *share* target while answering a different
+question — e.g. one team's total reported as the all-team total):
+
+| config | wrong-formula caught |
+|---|---|
+| TB.1 only | **0/6** — every wrong value binds → silently wrong |
+| + TB.3 (governed metric, `raw ≠ governed`) | **4/6** (in-scope) |
+| + TB.2 (self-consistency vote) | **6/6** (the out-of-scope tail, no metric) |
+
+Governed-metric coverage **4/6** (hybrid: out-of-scope carried by the vote). A 7th *contrast* question
+(`sum(amount_subtotal)`, forgot tax) is **caught by TB.1 already** (unbindable) — kept to mark the taxonomy
+boundary, excluded from the 0/6. **Honest scope:** mechanism demo only — candidates / metric-selection are
+planted (no LLM), coverage is partial by design, and this catches the wrong *use* of a right metric, not a wrong
+metric *definition*.
+
+---
+
+## 7. Related work & positioning
 
 - **Governed + secure NL analytics (prior art for the "unified" pillar):** Cortex Analyst, Databricks Genie,
   MS Fabric Data Agent (industry); SAFEFLOW (IFC, integrity+confidentiality). All **assume complete/inherited
@@ -241,10 +295,12 @@ Authorization in ERP LLM Agents."*
 
 ---
 
-## 7. Limitations & honest scope
+## 8. Limitations & honest scope
 
 - **Oracle harness, no LLM loop (public artifact):** attacks are deterministic ORM-level probes; the
-  end-to-end agent loop is validated privately. The PEP correctness claim is at the data-result plane.
+  end-to-end agent loop is validated privately. The PEP correctness claim is at the data-result plane. The
+  integrity layers (§6) likewise demonstrate *mechanisms* on planted answers/candidates — not measured LLM
+  hallucination or wrong-formula rates — and the governed-metric coverage is partial by design (hybrid).
 - **CE gap count is modest:** standard Odoo is broadly company-governed; the 5 gaps are real but the heavier
   gap/burden target is the bespoke `pco_core` or larger module sets.
 - **Emit soundness is bounded:** only pushdownable parent rules (single simple leaf) are soundly emittable
@@ -256,10 +312,10 @@ Authorization in ERP LLM Agents."*
 
 ---
 
-## 8. Reproducibility
+## 9. Reproducibility
 
-- Offline (no Odoo): `python tests/test_output_validator.py … test_sensitivity_registry.py …
-  test_policy_closure.py … test_policy_scan.py … test_policy_emit.py` (run in CI static-checks).
+- Offline (no Odoo): the `tests/test_*.py` suite (output-validator, sensitivity, policy-closure, policy-scan,
+  policy-emit, numeric-verifier, metrics-and-consistency) — run in CI static-checks.
 - Full benchmark + linter + emit: an Odoo 19 shell over the mock (V-vuln/V-rule) and over Odoo CE
   `sale,account,stock`; see [`README.md`](../README.md) for the exact `odoo shell` recipes. All runs in this
   report were produced in **isolated ephemeral Odoo 19 + Postgres containers**; committed reference copies live
@@ -267,12 +323,14 @@ Authorization in ERP LLM Agents."*
 
 ---
 
-## 9. Conclusion
+## 10. Conclusion
 
 ERP LLM agents leak rows at the data-result plane when record-rule governance is incomplete on child models —
 a gap the warehouse-native and action-plane lines of work do not close for ERP. ERP-AuthZBench measures it,
 PG-Agent closes it (clean on every class, in both schema variants, robust to adaptive path-switching), and
 PCC-ERP shows the per-model closures are *derivable*: it reconstructs the guard policy on the mock end-to-end
 and surfaces 5 genuine relational-traversal gaps in vanilla Odoo CE, emitting sound native rules exactly where
-the parent rule is pushdownable. The work is applied-security + benchmark + reference implementation for an
-under-served setting, with an explicitly honest soundness frontier.
+the parent rule is pushdownable. On the reliability axis (RQ6), the three-layer integrity stack drives the
+silently-wrong-number rate to zero and closes the numeric verifier's wrong-formula blind spot (TB.1 0/6 → +TB.3
+4/6 → +TB.2 6/6) via deterministic governed metrics + execution-voting. The work is applied-security + benchmark
++ reference implementation for an under-served setting, with an explicitly honest soundness frontier.
