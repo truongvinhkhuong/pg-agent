@@ -7,6 +7,10 @@ Public academic artifact for a permission-aware RAG agent on Odoo. It ships:
 - **`pg_agent_guard`** — a model-agnostic Policy Enforcement Point (PEP), the research CORE.
 - **`pco_core_mock`** — a 4-model sale-cluster schema skeleton (no business logic, no real data).
 - **`ERP-AuthZBench`** — an adversarial benchmark with a 5-class authorization-bypass taxonomy.
+- **`PCC-ERP`** — a policy-closure compiler (discover → derive → emit → verify) over the ORM relation graph.
+
+📄 **[Technical report](docs/technical-report.md)** — results-led synthesis (problem, benchmark, PEP, the real
+result tables, the closure compiler, related work, limitations).
 
 It runs **end-to-end on the mock + synthetic data with no access to any private code** — so the
 results are reproducible by reviewers. The same `pg_agent_guard` is separately validated against
