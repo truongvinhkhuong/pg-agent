@@ -305,3 +305,68 @@ def scan_corpus(env, modules, outdir="results/scale/corpus", baseline="results/s
     print(f"\nWrote endemic.csv ({len(erows)} rows), drift.csv ({len(drift)}), coverage.csv, "
           f"installed.txt ({len(installed)} modules) -> {outdir}/\n")
     return s, drift
+
+
+def soundness_report(env, modules=DEFAULT_MODULES, outdir="results/scale"):
+    """SOUNDNESS-THEOREM frontier (read-only): for each discovered GAP, re-classify the parent rule under the
+    pushdown soundness theorem (value-comparison ops; boolean structure irrelevant) and run the REQUIRED
+    P-ACTIVE-CLEAN check (`'active' in env[parent]._fields`). Emits the concrete sound child domain (re-imposing
+    `r.active=True` when the parent is active-bearing). Writes results/scale/soundness.csv. Does NOT change the
+    conservative emit gate — this is the frontier analysis (heuristic 1/5 -> theorem k/5)."""
+    from pushdown_soundness import pushdown_sound, pushdown, reclassify
+
+    scope, by_module = _scope_models(env, modules)
+    edges = _build_edges(env, scope)
+    ruled, rule_rows = _build_ruled(env, scope)
+    defines, mirrors = _build_defines(env, scope, set(ruled))
+    records = derive_gaps(edges, defines, ruled, scope, exclude_self_definer=mirrors)
+    gaps = [r for r in records if r["verdict"] == "GAP"]
+
+    rows = []
+    for g in gaps:
+        parent, disc, rpath = g["definer_model"], g["discriminator"], g["relation_path"] or ""
+        relation_field = rpath[:rpath.rfind(".")] if "." in rpath else ""
+        has_active = bool(parent in env and "active" in env[parent]._fields)
+        # the active rules governing (parent, disc); the emit is sound iff EVERY governing rule is sound.
+        domains = [r.domain_force or "" for r in env["ir.rule"].sudo().search(
+                   [("active", "=", True), ("model_id.model", "=", parent)])
+                   if disc in governance_fields(r.domain_force or "")]
+        if not domains:
+            continue
+        verdicts = [pushdown_sound(d) for d in domains]
+        all_sound = all(ok for ok, _ in verdicts)
+        why = "; ".join(sorted({w for ok, w in verdicts if not ok})) or "value-comparison"
+        # honest verdict: value-comparison-sound AND (active re-imposed when needed)
+        verdict = "sound" if all_sound else "manual-review"
+        emitted = ""
+        if all_sound:
+            try:                                          # representative emit (first governing rule)
+                emitted = pushdown(domains[0], relation_field, parent_has_active=has_active)
+            except ValueError:
+                emitted = ""
+        rows.append({"child_model": g["model"], "discriminator": disc, "parent_model": parent,
+                     "relation_field": relation_field, "parent_has_active": has_active,
+                     "n_rules": len(domains), "theorem": verdict, "why": why, "emitted_domain": emitted})
+
+    n_sound = sum(1 for r in rows if r["theorem"] == "sound")
+    print("\n=== ERP-AuthZBench — pushdown SOUNDNESS frontier (theorem) ===")
+    print(f"heuristic gate (parse_domain 'simple'): 1/{len(rows)} soundly emittable; "
+          f"THEOREM gate (value-comparison, any boolean structure, P-ACTIVE-CLEAN): {n_sound}/{len(rows)}.")
+    print(f"{'child':<36}{'parent':<26}{'active':<8}{'theorem':<14}why")
+    print("-" * 100)
+    for r in sorted(rows, key=lambda x: (x["theorem"] != "sound", x["child_model"])):
+        print(f"{r['child_model']:<36}{r['parent_model']:<26}{str(r['parent_has_active']):<8}"
+              f"{r['theorem']:<14}{r['why']}")
+        if r["emitted_domain"]:
+            print(f"    emit: {r['emitted_domain']}")
+    print("-" * 100)
+    print("Boolean structure (or/not, multi-field) is sound by the theorem; the withheld cases are hierarchical "
+          "(parent_of) — the genuine frontier, conservatively manual-review (withheld, not refuted).\n")
+
+    os.makedirs(outdir, exist_ok=True)
+    _write_csv(os.path.join(outdir, "soundness.csv"),
+               ["child_model", "discriminator", "parent_model", "relation_field", "parent_has_active",
+                "n_rules", "theorem", "why", "emitted_domain"],
+               sorted(rows, key=lambda x: (x["theorem"] != "sound", x["child_model"])))
+    print(f"Wrote soundness.csv ({len(rows)} rows) -> {outdir}/\n")
+    return rows

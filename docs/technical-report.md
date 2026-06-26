@@ -265,8 +265,53 @@ scale rises to **37 closures vs 9 hand-written (4.1×)**.
   rule's pushdownability**. Honest result: **1 of 5** is soundly emittable
   (`stock.storage.category.capacity → [('storage_category_id.company_id','in',company_ids)]`); the other **4
   are manual-review** because their parent rule is OR / `parent_of` / multi-field. We **refuse to push a
-  complex parent domain into one child leaf** (not sound in general) — that 1/5 is the real soundness frontier,
-  surfaced by `parse_domain`, not hidden.
+  complex parent domain into one child leaf** (not sound in general) — that 1/5 is the conservative gate's
+  frontier (it is sound-but-incomplete; §5.3.1 tightens it).
+
+### 5.3.1 Soundness frontier — a proved pushdown theorem · [`results/scale/soundness.csv`](../results/scale/soundness.csv)
+
+The §5.3 emit gate is **sound but incomplete**: it refuses OR / multi-field outright. We prove a **strictly
+tighter sound gate** ([`pushdown_soundness.py`](../data/erp_authzbench/pushdown_soundness.py)).
+
+**Theorem.** Let `r` be an F10 containment relation — a stored Many2one that is `required` (TOTAL) and
+`ondelete=cascade`, hence a **functional + total** map from each child `c` to a unique existing parent `π(c)`.
+For a parent domain `D_P`, the pushdown `D_P[f := r.f]` admits exactly the children `c` whose `π(c)` is admitted
+by the parent's *operative* gate, **provided** (1) every leaf operator is a stored **value-comparison**
+(`=,!=,in,not in,<,>,<=,>=,like,ilike,…`) and **not** hierarchical/subquery (`child_of,parent_of,any,not any`)
+nor `=?`; and (2) **P-ACTIVE-CLEAN** — if `P` has an `active` field, the emit re-imposes `(r.active,=,True)`
+(else manual-review). *Proof (sketch):* `r` functional+total ⇒ each value-comparison leaf `(r.f,op,v)` on `c`
+equals `(f,op,v)` on `π(c)`; the connectives `&/|/!` are pointwise on the same `c` (the same `π(c)`); by
+structural induction `pushdown(D_P,r)(c)=D_P(π(c))`. **Boolean structure (AND/OR/NOT, multi-field) imposes no
+condition** — it is *always* sound. ∎
+
+Two preconditions are load-bearing. The operative parent gate is `D_P ∧ active_test(P)`: pushing only `D_P`
+would admit a child of an **archived** parent that the parent rule rejects — so P-ACTIVE-CLEAN re-imposes
+`r.active` (a real case below). Hierarchical operators (`parent_of`/`child_of`) recurse over `P`'s own hierarchy;
+their dotted-rewrite semantics are implementation-dependent, so we **withhold** them (manual-review) — we do not
+*refute* them.
+
+The theorem reads cleanly off `parse_domain`'s `reason` (which always surfaces every non-`{=,in}` operator). On
+the committed 5-gap CE emit set (§5.3) it lifts **1/5 → 3/5** soundly emittable (the `or/not` and `or/not;multi-field`
+gaps become sound; only the two `op:parent_of` gaps remain). A live scan of the Sales **app**
+(`sale_management+account+stock`, which adds the quotation-template, 6 gaps) gives **1/6 → 4/6**:
+
+| child gap | parent | theorem | emitted child domain (concrete) |
+|---|---|---|---|
+| `account.bank.statement.line` | `account.move` | **sound** | `[('move_id.move_type','in',(…)), '|', ('move_id.invoice_user_id','=',user.id), ('move_id.invoice_user_id','=',False)]` |
+| `sale.order.line` | `sale.order` | **sound** | `['|', ('order_id.user_id','=',user.id), ('order_id.user_id','=',False)]` |
+| `sale.order.template.line` | `sale.order.template` (active) | **sound** | `[('sale_order_template_id.active','=',True), ('sale_order_template_id.company_id','in',company_ids+[False])]` |
+| `stock.storage.category.capacity` | `stock.storage.category` | **sound** | `[('storage_category_id.company_id','in',company_ids+[False])]` |
+| `account.fiscal.position.account` | `account.fiscal.position` | manual-review | `op:parent_of` (withheld) |
+| `account.payment.term.line` | `account.payment.term` | manual-review | `op:parent_of` (withheld) |
+
+The OR/multi-field rules now emit soundly (full structure pushed), and `sale.order.template` — an
+**active-bearing** parent — is handled by re-imposing `sale_order_template_id.active`, exactly the P-ACTIVE-CLEAN
+case. The two `parent_of` gaps are the genuine remaining frontier. **Anti-claims:** we do **not** soundly compile
+arbitrary domains (hierarchical/subquery/`active`-sensitive are excluded); `parent_of` is **withheld, not proven
+unsound**; the 3/5–4/6 fraction is corpus-specific (multi-hop chains need per-edge re-verification, `active`
+re-checked per parent); the theorem **refines** the heuristic (the `reason` string is still its input), it does
+not obsolete it. The archived-parent counterexample is encoded as a regression test
+([`tests/test_pushdown_soundness.py`](../tests/test_pushdown_soundness.py)).
 
 ### 5.4 ABAC/ReBAC formalization (RQ7) · [`results/policy_model.csv`](../results/policy_model.csv)
 
@@ -418,9 +463,12 @@ Agents."*
   live-tenant exploitability (depends on deployed rules/ACLs/agent) or completeness (corpus = the installed CE
   union; OCA community add-ons are a higher-burden future target). The heaviest target remains the bespoke
   `pco_core`.
-- **Emit soundness is bounded:** only pushdownable parent rules (single simple leaf) are soundly emittable
-  (1/5 on CE); complex domains (OR/parent_of/multi-field) are flagged manual-review — sound pushdown of
-  arbitrary domains is the research frontier, not claimed.
+- **Emit soundness is bounded but characterized (§5.3.1):** the conservative gate emits only single simple
+  leaves (1/5 on CE); a **proved theorem** widens this to any boolean structure of stored value-comparison
+  leaves through a required-cascade M2o, with `active`-bearing parents handled by re-imposing `r.active`
+  (1/5 → 3/5 on the committed CE set, 4/6 on the Sales-app scan). The remaining frontier — hierarchical
+  `parent_of`/`child_of` and subquery operators — is **withheld (manual-review), not refuted**; sound pushdown
+  of *arbitrary* domains is not claimed.
 - **Owner axis** is a local opt-in field, out of relational-closure scope by construction.
 - **Red-team is grammar-exhaustive, not exhaustive (§4.3):** the automated red-team enumerates a *defined*
   ORM-pivot grammar (a modeled threat surface) deterministically and without an LLM; a green gate means no bypass
@@ -531,7 +579,9 @@ PG-Agent closes it (clean on every class, in both schema variants, robust to ada
 PCC-ERP shows the per-model closures are *derivable*: it reconstructs the guard policy on the mock end-to-end
 and shows the relational-traversal gap is **endemic** across vanilla Odoo CE — recurring in 6 of 8 business
 domains (15 gaps), low per model but systematic — emitting sound native rules exactly where the parent rule is
-pushdownable. On the reliability axis (RQ6), the three-layer integrity stack drives the
+pushdownable, with a **proved soundness theorem** that characterizes the frontier (the conservative gate is
+sound-but-incomplete; the theorem lifts 1/5 → 3/5 on CE, withholding only hierarchical `parent_of`). On the
+reliability axis (RQ6), the three-layer integrity stack drives the
 silently-wrong-number rate to zero and closes the numeric verifier's wrong-formula blind spot (TB.1 0/6 → +TB.3
 4/6 → +TB.2 6/6) via deterministic governed metrics + execution-voting. Beyond the canonical results, the
 residual-risk surface is regression-gated by an exhaustive ORM-pivot **red-team grammar** (residual-leak 0/41);

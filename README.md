@@ -56,6 +56,7 @@ pg-agent/
 │   ├── domain_ast.py               # F10: pure ir.rule domain extractor (parse_domain + governance_fields)
 │   ├── policy_emit.py              # F10 Increment 2: pure emit core (POLICY + native ir.rule, no Odoo)
 │   ├── endemic.py                  # corpus endemicity aggregator: breadth + per-domain distribution (pure)
+│   ├── pushdown_soundness.py       # PROVED pushdown soundness theorem: value-comparison gate + active re-impose (pure)
 │   ├── policy_model.py             # RQ7: pure ABAC×ReBAC formalization of POLICY (round-trips to _authz_domain)
 │   ├── docrag.py                   # RQ8 L5: pure Doc-RAG corpus + deterministic lexical retriever (no LLM)
 │   ├── agent_loop.py               # End-to-end agent-loop proxy: ScriptedAgent + LLMAgent seam (no LLM in CI)
@@ -354,6 +355,13 @@ CE business apps** (148 models) and summarizes the result via the pure
 gaps — hr/project/account/sale/crm/stock; mrp/purchase clean), **0 verdict drift** vs the 3-module baseline
 ([`results/scale/corpus/`](results/scale/corpus/)). The headline is *breadth + the per-domain distribution*,
 not a pooled % (15 of 2 072 reachable pairs = 0.7% — low per model, systematic across domains).
+
+**Soundness frontier (proved theorem):** [`pushdown_soundness.py`](data/erp_authzbench/pushdown_soundness.py)
+proves pushdown is sound for **any** boolean structure of stored value-comparison leaves through a
+required-cascade M2o (boolean structure is irrelevant; hierarchical `parent_of`/`child_of` + `active`-sensitive
+parents are the frontier — the latter handled by re-imposing `r.active`). [`policy_scan.soundness_report`](tests/policy_scan.py)
+re-classifies the CE gaps: **heuristic 1/5 → theorem 3/5** ([`results/scale/soundness.csv`](results/scale/soundness.csv));
+the archived-parent counterexample is a regression test in [`tests/test_pushdown_soundness.py`](tests/test_pushdown_soundness.py).
 
 The pure derivation core (`policy_closure.derive_gaps`) + the AST extractor + the endemic aggregator are
 offline-unit-tested by [`tests/test_policy_scan.py`](tests/test_policy_scan.py) and

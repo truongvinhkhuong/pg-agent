@@ -1,0 +1,7 @@
+child_model,discriminator,parent_model,relation_field,parent_has_active,n_rules,theorem,why,emitted_domain
+account.bank.statement.line,invoice_user_id,account.move,move_id,False,1,sound,value-comparison,"[('move_id.move_type', 'in', ('out_invoice', 'out_refund')), '|', ('move_id.invoice_user_id', '=', user.id), ('move_id.invoice_user_id', '=', False)]"
+sale.order.line,user_id,sale.order,order_id,False,1,sound,value-comparison,"['|', ('order_id.user_id', '=', user.id), ('order_id.user_id', '=', False)]"
+sale.order.template.line,company_id,sale.order.template,sale_order_template_id,True,1,sound,value-comparison,"[('sale_order_template_id.active', '=', True), ('sale_order_template_id.company_id', 'in', company_ids + [False])]"
+stock.storage.category.capacity,company_id,stock.storage.category,storage_category_id,False,1,sound,value-comparison,"[('storage_category_id.company_id', 'in', company_ids + [False])]"
+account.fiscal.position.account,company_id,account.fiscal.position,position_id,True,1,manual-review,op:parent_of,
+account.payment.term.line,company_id,account.payment.term,payment_id,True,1,manual-review,op:parent_of,

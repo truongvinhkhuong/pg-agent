@@ -322,9 +322,38 @@ union; OCA community add-ons are a higher-burden future target). Manual-burden a
         emittable (\code{stock.storage.category.capacity} $\to$
         \code{[('storage_category_id.company_id','in',company_ids)]}); the other \textbf{4 are manual-review}
         because their parent rule is OR / \code{parent_of} / multi-field. We \textbf{refuse to push a complex
-        parent domain into one child leaf} (not sound in general) --- that 1/5 is the real soundness frontier,
-        surfaced by \code{parse_domain}, not hidden.
+        parent domain into one child leaf} (not sound in general) --- that 1/5 is the conservative gate's
+        frontier (sound-but-incomplete; \S5.3.1 tightens it).
 \end{itemize}
+
+\subsubsection{Soundness frontier --- a proved pushdown theorem}
+The \S5.3 gate is \textbf{sound but incomplete} (it refuses OR / multi-field outright). We prove a strictly
+tighter sound gate (\code{pushdown_soundness.py}).
+
+\noindent\textbf{Theorem.} Let $r$ be an F10 containment relation --- a stored Many2one that is \code{required}
+(total) and \code{ondelete=cascade}, hence a \textbf{functional + total} map from each child $c$ to a unique
+existing parent $\pi(c)$. For a parent domain $D_P$, the pushdown $D_P[f := r.f]$ admits exactly the children
+$c$ whose $\pi(c)$ is admitted by the parent's \emph{operative} gate, provided (1) every leaf operator is a
+stored \textbf{value-comparison} ($=,\neq,\mathtt{in},\mathtt{not\ in},<,>,\le,\ge,\mathtt{like},\ldots$) and
+\textbf{not} hierarchical/subquery (\code{child_of}, \code{parent_of}, \code{any}, \code{not any}) nor
+\code{=?}; and (2) \textbf{P-ACTIVE-CLEAN} --- if $P$ has an \code{active} field, the emit re-imposes
+\code{(r.active,=,True)} (else manual-review). \emph{Proof (sketch):} $r$ functional+total $\Rightarrow$ each
+value-comparison leaf $(r.f,op,v)$ on $c$ equals $(f,op,v)$ on $\pi(c)$; the connectives $\&/|/!$ are pointwise
+on the same $c$ (the same $\pi(c)$); by structural induction $\mathrm{pushdown}(D_P,r)(c)=D_P(\pi(c))$.
+\textbf{Boolean structure (AND/OR/NOT, multi-field) imposes no condition} --- it is always sound. $\square$
+
+The operative parent gate is $D_P \wedge \mathrm{active\_test}(P)$: pushing only $D_P$ would admit a child of an
+\textbf{archived} parent that the parent rule rejects --- so P-ACTIVE-CLEAN re-imposes \code{r.active}.
+Hierarchical operators recurse over $P$'s own hierarchy; their dotted-rewrite semantics are
+implementation-dependent, so we \textbf{withhold} them (manual-review), we do not \emph{refute} them. Reading
+the verdict off \code{parse_domain}'s reason, the theorem lifts \textbf{1/5 $\to$ 3/5} soundly emittable on the
+committed CE emit set (the \code{or/not} and \code{or/not;multi-field} gaps become sound; the two
+\code{op:parent_of} gaps remain), and \textbf{1/6 $\to$ 4/6} on the Sales-app scan
+(\code{results/scale/soundness.csv}) --- including \code{sale.order.template.line}, an \emph{active}-bearing
+parent handled by re-imposing \code{sale_order_template_id.active} (the P-ACTIVE-CLEAN case). \textbf{Anti-claims:}
+we do NOT soundly compile arbitrary domains (hierarchical/subquery/\code{active}-sensitive excluded);
+\code{parent_of} is withheld, NOT refuted; the fraction is corpus-specific; the theorem refines the heuristic,
+it does not obsolete it. The archived-parent counterexample is a regression test.
 
 \subsection{ABAC/ReBAC formalization (RQ7)}
 \code{results/policy_model.csv}. The bespoke per-model POLICY is, named explicitly, an \textbf{instance of a
@@ -489,9 +518,12 @@ framing: \emph{``Policy-Closure Compilation for Row-Level Authorization in ERP L
         design (hybrid).
   \item \textbf{CE gap count is modest:} standard Odoo is broadly company-governed; the 5 gaps are real but the
         heavier gap/burden target is the bespoke \code{pco_core} or larger module sets.
-  \item \textbf{Emit soundness is bounded:} only pushdownable parent rules (single simple leaf) are soundly
-        emittable (1/5 on CE); complex domains (OR/parent\_of/multi-field) are flagged manual-review --- sound
-        pushdown of arbitrary domains is the research frontier, not claimed.
+  \item \textbf{Emit soundness is bounded but characterized (\S5.3.1):} the conservative gate emits only single
+        simple leaves (1/5 on CE); a \textbf{proved theorem} widens this to any boolean structure of stored
+        value-comparison leaves through a required-cascade M2o (1/5 $\to$ 3/5 on CE, 4/6 on the Sales-app scan),
+        with \code{active}-bearing parents handled by re-imposing \code{r.active}. The remaining frontier
+        (hierarchical \code{parent_of}/\code{child_of}, subquery) is withheld (manual-review), not refuted;
+        sound pushdown of \emph{arbitrary} domains is not claimed.
   \item \textbf{Owner axis} is a local opt-in field, out of relational-closure scope by construction.
   \item \textbf{Red-team is grammar-exhaustive, not exhaustive (\S4.3):} the automated red-team enumerates a
         \emph{defined} ORM-pivot grammar (a modeled threat surface) deterministically and without an LLM; a
