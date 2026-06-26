@@ -1,0 +1,7 @@
+id,kind,persona,measure,gold,governed_sum,wrong_kind,wrong_value,raw_slips,verifier_slips,correct_passes,false_flag
+int-agg-qty,aggregation,ttv,quantity,156.0,156.0,crossteam,749.0,yes,no,yes,no
+int-agg-amount,aggregation,viewer_all,amount_total,11487300000.0,11487300000.0,fabricated,12291411000.0,yes,no,yes,no
+int-ratio-share,ratio,ttv,quantity,28.2,156.0,fabricated,36.2,yes,no,yes,no
+int-growth-pct,growth-pct,ttv,quantity,-75.2,156.0,fabricated,-67.2,yes,no,yes,no
+int-period-cmp,period-comparison,ttv,quantity,-94.0,156.0,fabricated,-100.58,yes,no,yes,no
+int-multistep,multi-step,viewer_all,amount_total,443300000.0,11487300000.0,fabricated,474331000.0,yes,no,yes,no

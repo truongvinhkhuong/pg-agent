@@ -31,7 +31,7 @@ from odoo import _, models
 from odoo.exceptions import AccessError
 
 from ..audit.audit_log import audit_decision
-from ..services import denial, output_validator
+from ..services import denial, numeric_verifier, output_validator
 from . import sensitivity
 
 # Uniform redaction sentinel for masked field values (T2.2).
@@ -266,5 +266,17 @@ class PgAgentGuard(models.AbstractModel):
             audit_decision(
                 self.env, "(answer)", "output_validate", [], allowed=False,
                 reason="output-validator: leaked masked/cross-team value",
+            )
+        return result
+
+    # ── Numeric verification (TB.1 — integrity) ──────────────────────────────
+    def guarded_verify_numbers(self, answer_text, execution_values, *, rel_tol=0.005):
+        """Bind every number in a final NL answer to a derivation of the execution result;
+        audit any unbindable (silently-wrong) number. The LLM must not do arithmetic."""
+        result = numeric_verifier.verify_numbers(answer_text, execution_values, rel_tol=rel_tol)
+        if result.unbound:
+            audit_decision(
+                self.env, "(answer)", "numeric_verify", [], allowed=False,
+                reason="numeric-verifier: answer contains unbindable number(s)",
             )
         return result

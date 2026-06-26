@@ -44,6 +44,7 @@ pg-agent/
 │       ├── models/sensitivity.py   #   T2.1 sensitivity registry + clearance resolution (code-default)
 │       ├── services/denial.py      #   T2.4 uniform empty result + constant-time floor/jitter
 │       ├── services/output_validator.py  # T2.3 pure answer scanner (no Odoo/LLM)
+│       ├── services/numeric_verifier.py   # TB.1 pure numeric verifier — RQ6 (no Odoo/LLM)
 │       ├── audit/audit_log.py      #   INDEPENDENT audit (stdlib logging + ir.logging; no tdh_audit)
 │       └── security/pep_groups.xml
 ├── data/erp_authzbench/
@@ -53,6 +54,7 @@ pg-agent/
 │   ├── policy_closure.py           # F10: pure closure-derivation core — derive_closures + derive_gaps (no Odoo)
 │   ├── domain_ast.py               # F10: pure ir.rule domain extractor (parse_domain + governance_fields)
 │   ├── policy_emit.py              # F10 Increment 2: pure emit core (POLICY + native ir.rule, no Odoo)
+│   ├── integrity.py                # T4.3 integrity test set (symbolic gold) — RQ6
 │   └── attacks_experimental.py     # ungrounded generality demos (ownership-bypass)
 ├── tests/
 │   ├── evaluation_script.py        # benchmark harness -> environment × attack matrix + metrics
@@ -62,7 +64,8 @@ pg-agent/
 │   ├── test_sensitivity_registry.py  # offline pytest (no Odoo)
 │   ├── test_policy_closure.py      # offline pytest — closure-derivation core (no Odoo)
 │   ├── test_policy_scan.py         # offline pytest — derive_gaps + governance_fields (no Odoo)
-│   └── test_policy_emit.py         # offline pytest — emit core (no Odoo)
+│   ├── test_policy_emit.py         # offline pytest — emit core (no Odoo)
+│   └── test_numeric_verifier.py    # offline pytest — numeric verifier (no Odoo)
 ├── config/
 │   ├── odoo.mock.conf              # PUBLIC mode (no private path)
 │   └── odoo.prod.conf              # PRIVATE/validation mode
@@ -165,8 +168,32 @@ In-scope families hold across every pivot → the PEP is robust to path-switchin
 canonical attack. The `answer-channel-paraphrase` family is **out of PEP scope** (`in_scope=False`)
 and reports a *real* output-validator limit — measured by an independent ground-truth oracle, not by
 the validator under test — so it is **documented, not hidden** ("report truthfully, don't claim
-eliminated"). The integrity half of T4.5 (wrong-number variants) is deferred — blocked-on the
-integrity test set (T4.3) and numeric verifier (TB.1), which are not part of this artifact yet.
+eliminated"). The integrity counterpart (wrong-number variants) is now covered by the integrity set
+(T4.3) + numeric verifier (TB.1) — see below.
+
+### Integrity — numeric verifier (RQ6)
+
+The proposal's **applied / adopt-not-invent** pillar: the LLM must not do arithmetic — every number in
+the answer must **bind to the execution result** (present in the governed table, or a deterministic
+derivation: sum / diff / ratio / pct-change / share, within tolerance). [`numeric_verifier.py`](addons/pg_agent_guard/services/numeric_verifier.py)
+is a pure, offline-tested scanner (14 cases incl. the no-false-flag derived ones); the guard wraps it as
+`guarded_verify_numbers`. The integrity set [`integrity.py`](data/erp_authzbench/integrity.py) has 6
+questions across **5 kinds** (aggregation / ratio / growth-% / period-comparison / multi-step), each with
+a **symbolic gold** computed via a trusted sudo path.
+
+`integrity(env)` ([committed results](results/integrity.csv)) plants a gold-derived **correct** answer and a
+silently-**wrong** one per question and runs the verifier:
+
+| metric | result |
+|---|---|
+| Silently-Wrong-Number Rate | raw text-to-ORM **6/6** (wrong present) → **+numeric-verifier 0/6** (slips through) |
+| false-flag rate on correct/derived answers | **0/6** (passes growth-%, ratios, negative diffs — the hard case) |
+| coverage | **5/5 kinds** |
+
+**Honest scope:** no LLM in the public artifact — this demonstrates the verifier's *mechanism* (catch
+unbindable, pass legitimate derivations), not a measured model hallucination rate (validated privately).
+TB.1 catches **fabricated / cross-data** numbers; *correct-arithmetic-with-the-wrong-formula* is a
+documented limitation that TB.2 (self-consistency) / TB.3 (governed metrics) address.
 
 ## Run the benchmark (mock, no private access)
 
@@ -188,6 +215,7 @@ run(env)                        # uniform-denial ON  (defended)
 run(env, denial_enabled=False)  # denial-rich baseline -> Existence-Inference Rate 1/1
 ablation(env)                   # defense-in-depth ladder
 adaptive(env)                   # adaptive probing -> residual-risk per family (T4.5)
+integrity(env)                  # numeric verifier vs silently-wrong numbers -> results/integrity.csv (RQ6)
 export_results(env)             # regenerate every paper table -> results/*.csv + results.json
 PY
 ```
