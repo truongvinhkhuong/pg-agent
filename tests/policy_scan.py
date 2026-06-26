@@ -257,3 +257,51 @@ def emit_classify(env, modules=DEFAULT_MODULES, outdir="results/scale"):
                sorted(rows, key=lambda x: (x["module"], x["model"], x["discriminator"])))
     print(f"Wrote emit.csv ({len(rows)} rows) -> {outdir}/\n")
     return rows
+
+
+def scan_corpus(env, modules, outdir="results/scale/corpus", baseline="results/scale/coverage.csv"):
+    """ENDEMICITY scan: run the validated `scan` over a CORPUS of business domains, summarize the
+    finding as BREADTH (domains with >=1 gap / domains with an at-risk child) + the per-domain
+    distribution (NOT a pooled %), and keyed-diff verdict DRIFT vs the committed 3-module baseline so
+    a new rule that closes a gap (or a re-routed closure) is explained, never masked. Writes the
+    corpus coverage + endemic + drift CSVs under `outdir`; does NOT overwrite the baseline coverage.csv."""
+    from endemic import endemic_summary, diff_baseline, read_coverage_csv
+
+    records, _metric = scan(env, modules, outdir=outdir)        # corpus coverage.csv/rules.csv -> outdir
+    s = endemic_summary(records)
+    drift = diff_baseline(records, read_coverage_csv(baseline)) if os.path.exists(baseline) else []
+    installed = sorted(m.name for m in
+                       env["ir.module.module"].sudo().search([("state", "=", "installed")]))
+
+    print("\n=== ERP-AuthZBench — ENDEMICITY across the CE corpus ===")
+    print(f"BREADTH: the relational-traversal gap appears in {s['n_domains_with_gap']} of "
+          f"{s['n_domains_with_at_risk']} business domains that contain an at-risk child "
+          f"({s['n_domains_scanned']} domains scanned).")
+    print(f"pooled gap-rate (supporting): {s['gaps_total']}/{s['at_risk_total']} = {s['pooled_gap_rate']}  "
+          f"(per-domain rate {s['rate_min']}..{s['rate_max']}); context gaps/reachable = "
+          f"{s['gaps_total']}/{s['n_reachable_rows']} = {s['gaps_over_reachable']} (low per-model).")
+    print("-- per domain (child x axis: gaps / at-risk) --")
+    for dm in sorted(s["per_domain"]):
+        d = s["per_domain"][dm]
+        print(f"  {dm:<16}{d['gaps']}/{d['at_risk']}  (rate {d['rate']})")
+    if drift:
+        print(f"-- verdict DRIFT vs 3-module baseline ({len(drift)}) --")
+        for r in drift:
+            print(f"  {r['model']:<34}{r['discriminator']:<16}{r['before']} -> {r['after']}  [{r['cause']}]")
+    else:
+        print("-- no verdict drift vs 3-module baseline: the 3 baseline domains reproduce exactly --")
+
+    os.makedirs(outdir, exist_ok=True)
+    erows = [{"domain": dm, "gaps": s["per_domain"][dm]["gaps"],
+              "at_risk": s["per_domain"][dm]["at_risk"], "rate": s["per_domain"][dm]["rate"]}
+             for dm in sorted(s["per_domain"])]
+    erows.append({"domain": "TOTAL", "gaps": s["gaps_total"], "at_risk": s["at_risk_total"],
+                  "rate": s["pooled_gap_rate"]})
+    _write_csv(os.path.join(outdir, "endemic.csv"), ["domain", "gaps", "at_risk", "rate"], erows)
+    _write_csv(os.path.join(outdir, "drift.csv"),
+               ["model", "discriminator", "before", "after", "cause"], drift)
+    with open(os.path.join(outdir, "installed.txt"), "w", encoding="utf-8") as fh:
+        fh.write("\n".join(installed) + "\n")
+    print(f"\nWrote endemic.csv ({len(erows)} rows), drift.csv ({len(drift)}), coverage.csv, "
+          f"installed.txt ({len(installed)} modules) -> {outdir}/\n")
+    return s, drift

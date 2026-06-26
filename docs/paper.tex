@@ -278,6 +278,37 @@ Manual-burden (secondary, honest): 11 relational closures auto-derived vs the 9 
 paths ($\sim$1.2$\times$) --- CE containment chains are shallow, so the ratio is modest; the heavier target is
 the bespoke \code{pco_core} / larger module sets.
 
+\subsubsection{Endemicity across the CE corpus}
+Three modules are an anecdote. Running the \emph{same} validated scanner over a corpus of \textbf{11 installed
+Odoo 19 CE business apps} (sale, account, stock, purchase, mrp, project, crm, hr, fleet, repair, maintenance ---
+148 in-scope models, 33 containment edges, 14 context-bound discriminators) shows the relational-traversal gap
+is \textbf{endemic}: it recurs in \textbf{6 of the 8 business domains} that contain an \emph{at-risk} child
+model (one reachable through a containment edge to a parent enforcing a context-bound team/company/owner rule).
+The 3-module baseline reproduces with \textbf{zero verdict drift} (the 5 known gaps unchanged; the rest are
+additions).
+
+\begin{center}\small
+\begin{tabular}{@{}lc@{\hskip 2em}lc@{}}
+\toprule
+domain & gaps / at-risk & domain & gaps / at-risk \\
+\midrule
+hr      & \textbf{5 / 7} & account  & \textbf{3 / 6} \\
+project & \textbf{3 / 4} & sale     & \textbf{2 / 4} \\
+crm     & \textbf{1 / 1} & stock    & \textbf{1 / 1} \\
+mrp     & 0 / 2          & purchase & 0 / 2 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{15 gaps across 6 domains} (vs 5 across 3). \textbf{The finding is breadth, not frequency:} per
+\emph{model} the gap is rare --- only 15 of 2{,}072 reachable child$\times$axis pairs (0.7\%) --- but among the
+at-risk population it is common and crosses nearly every domain (pooled 15/27; per-domain rate 0--1). Two
+domains (mrp, purchase) are clean. Endemic means \textbf{ubiquitous-across-domains and systematic} (the direct
+consequence of record-rule-on-the-parent-only), \textbf{not} ``X\% of Odoo is vulnerable''; we do not claim
+live-tenant exploitability (depends on deployed rules/ACLs/agent) nor completeness (corpus = the installed
+union; OCA community add-ons are a higher-burden future target). Manual-burden at corpus scale rises to
+\textbf{37 closures vs 9 hand-written (4.1$\times$)}.
+
 \subsection{Emit + runtime-verify}
 \code{results/scale/emit.csv}.
 \begin{itemize}[leftmargin=*]

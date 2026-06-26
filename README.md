@@ -55,6 +55,7 @@ pg-agent/
 │   ├── policy_closure.py           # F10: pure closure-derivation core — derive_closures + derive_gaps (no Odoo)
 │   ├── domain_ast.py               # F10: pure ir.rule domain extractor (parse_domain + governance_fields)
 │   ├── policy_emit.py              # F10 Increment 2: pure emit core (POLICY + native ir.rule, no Odoo)
+│   ├── endemic.py                  # corpus endemicity aggregator: breadth + per-domain distribution (pure)
 │   ├── policy_model.py             # RQ7: pure ABAC×ReBAC formalization of POLICY (round-trips to _authz_domain)
 │   ├── docrag.py                   # RQ8 L5: pure Doc-RAG corpus + deterministic lexical retriever (no LLM)
 │   ├── agent_loop.py               # End-to-end agent-loop proxy: ScriptedAgent + LLMAgent seam (no LLM in CI)
@@ -341,8 +342,16 @@ Result (62 models, 15 containment edges, 6 discriminators; committed in
   (~1.2×). CE containment chains are shallow, so the burden ratio is modest here; the heavier-burden / heavier-gap
   target is the bespoke `pco_core` (private) or a larger module set.
 
-The pure derivation core (`policy_closure.derive_gaps`) + the AST extractor are offline-unit-tested by
-[`tests/test_policy_scan.py`](tests/test_policy_scan.py) (20 cases incl. the audit-FK-closure regression).
+**Endemicity (corpus scan):** [`policy_scan.scan_corpus`](tests/policy_scan.py) runs the same scanner over **11
+CE business apps** (148 models) and summarizes the result via the pure
+[`endemic.endemic_summary`](data/erp_authzbench/endemic.py): the gap recurs in **6 of 8 at-risk domains** (15
+gaps — hr/project/account/sale/crm/stock; mrp/purchase clean), **0 verdict drift** vs the 3-module baseline
+([`results/scale/corpus/`](results/scale/corpus/)). The headline is *breadth + the per-domain distribution*,
+not a pooled % (15 of 2 072 reachable pairs = 0.7% — low per model, systematic across domains).
+
+The pure derivation core (`policy_closure.derive_gaps`) + the AST extractor + the endemic aggregator are
+offline-unit-tested by [`tests/test_policy_scan.py`](tests/test_policy_scan.py) and
+[`tests/test_endemic.py`](tests/test_endemic.py) (incl. the calibration anchor vs the committed coverage.csv).
 
 ### Emit + verify (F10 Increment 2)
 

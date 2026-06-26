@@ -19,7 +19,8 @@ for ERP. We contribute: (i) **ERP-AuthZBench**, an adversarial benchmark for row
 LLM agents; (ii) **PG-Agent**, a model-agnostic data-result-plane Policy Enforcement Point (PEP) that is
 clean on every benchmark class; and (iii) **PCC-ERP**, a policy-closure compiler that *derives* the per-model
 row-level closures from the ORM relation graph + existing record rules, emits them as enforceable policy, and
-runtime-verifies gap closure — validated on the mock end-to-end and on vanilla Odoo CE `sale`+`account`+`stock`.
+runtime-verifies gap closure — validated on the mock end-to-end and at corpus scale on vanilla Odoo CE, where
+the relational-traversal gap proves **endemic** (15 gaps recurring across 6 of 8 business domains).
 On the orthogonal reliability axis (RQ6) we adopt a three-layer **integrity** stack (numeric verifier + governed
 metrics + execution-guided self-consistency) that drives the silently-wrong-number rate to zero and catches
 correct-arithmetic-with-the-wrong-formula — framed as applied, not novelty. We additionally (iv) regression-gate
@@ -221,6 +222,38 @@ Manual-burden (secondary, honest): 11 relational closures auto-derived vs the 9 
 (~1.2×) — CE containment chains are shallow, so the ratio is modest; the heavier target is the bespoke
 `pco_core` / larger module sets.
 
+### 5.2.1 Endemicity across the CE corpus · [`results/scale/corpus/`](../results/scale/corpus/)
+
+Three modules are an anecdote. Running the *same* validated scanner over a corpus of **11 installed Odoo 19 CE
+business apps** (sale, account, stock, purchase, mrp, project, crm, hr, fleet, repair, maintenance — 148
+in-scope models, 33 containment edges, 14 context-bound discriminators) shows the relational-traversal gap is
+**endemic**: it recurs in **6 of the 8 business domains** that contain an *at-risk* child model (a child
+reachable through a containment edge to a parent that enforces a context-bound team/company/owner rule — the
+`parent_governed` predicate is already strict, so the denominator means exactly "the parent guards this axis").
+The 3-module baseline reproduces **with zero verdict drift** ([`drift.csv`](../results/scale/corpus/) empty;
+the 5 known gaps are unchanged, the rest are additions).
+
+| domain | gaps / at-risk child×axis | domain | gaps / at-risk |
+|---|---|---|---|
+| hr | **5 / 7** | account | **3 / 6** |
+| project | **3 / 4** | sale | **2 / 4** |
+| crm | **1 / 1** | stock | **1 / 1** |
+| mrp | 0 / 2 | purchase | 0 / 2 |
+
+**15 gaps across 6 domains** (vs 5 across 3). New gaps include `hr.employee.skill`/`hr.resume.line` →
+`employee_id.company_id`, `project.task.stage.personal` → `task_id.{company_id,partner_id,user_ids}`,
+`crm.team.member` → `crm_team_id.company_id`, `sale.order.template.line` → `sale_order_template_id.company_id`.
+
+**The finding is breadth, not frequency.** Per *model* the gap is rare — only **15 of 2 072** reachable
+child×axis pairs (0.7%) — because being at-risk requires a containment chain to a context-governed parent. But
+*among* that at-risk population the gap is common and **crosses nearly every domain** (pooled 15/27; per-domain
+rate 0–1, table). Two domains (mrp, purchase) are clean — not every domain is vulnerable, which is the honest
+counterpoint. Endemic here means **ubiquitous-across-domains and systematic** (the direct consequence of
+record-rule-on-the-parent-only), **not** "X% of Odoo is vulnerable". We do **not** claim exploitability on a
+live tenant (that depends on the deployed rules/ACLs/agent) nor completeness (the corpus is the installed
+union; community add-ons — OCA — are a higher-burden target left to future work). Manual-burden at corpus
+scale rises to **37 closures vs 9 hand-written (4.1×)**.
+
 ### 5.3 Emit + runtime-verify · [`results/scale/emit.csv`](../results/scale/emit.csv)
 
 - **pco mock (end-to-end):** emit a guard `POLICY` from the derived closures; it **reproduces the hand-written
@@ -358,8 +391,13 @@ Authorization in ERP LLM Agents."*
   end-to-end agent loop is validated privately. The PEP correctness claim is at the data-result plane. The
   integrity layers (§6) likewise demonstrate *mechanisms* on planted answers/candidates — not measured LLM
   hallucination or wrong-formula rates — and the governed-metric coverage is partial by design (hybrid).
-- **CE gap count is modest:** standard Odoo is broadly company-governed; the 5 gaps are real but the heavier
-  gap/burden target is the bespoke `pco_core` or larger module sets.
+- **CE gap rate is low per model but endemic across domains (§5.2.1):** standard Odoo is broadly
+  company-governed, so per model the gap is rare (15 of 2 072 reachable child×axis pairs, 0.7%); the finding is
+  **breadth** — it recurs in 6 of 8 at-risk domains — not a high per-model rate. The headline is the per-domain
+  distribution + the breadth fraction, never a pooled percentage; mrp/purchase are clean. We do not claim
+  live-tenant exploitability (depends on deployed rules/ACLs/agent) or completeness (corpus = the installed CE
+  union; OCA community add-ons are a higher-burden future target). The heaviest target remains the bespoke
+  `pco_core`.
 - **Emit soundness is bounded:** only pushdownable parent rules (single simple leaf) are soundly emittable
   (1/5 on CE); complex domains (OR/parent_of/multi-field) are flagged manual-review — sound pushdown of
   arbitrary domains is the research frontier, not claimed.
@@ -442,8 +480,9 @@ ERP LLM agents leak rows at the data-result plane when record-rule governance is
 a gap the warehouse-native and action-plane lines of work do not close for ERP. ERP-AuthZBench measures it,
 PG-Agent closes it (clean on every class, in both schema variants, robust to adaptive path-switching), and
 PCC-ERP shows the per-model closures are *derivable*: it reconstructs the guard policy on the mock end-to-end
-and surfaces 5 genuine relational-traversal gaps in vanilla Odoo CE, emitting sound native rules exactly where
-the parent rule is pushdownable. On the reliability axis (RQ6), the three-layer integrity stack drives the
+and shows the relational-traversal gap is **endemic** across vanilla Odoo CE — recurring in 6 of 8 business
+domains (15 gaps), low per model but systematic — emitting sound native rules exactly where the parent rule is
+pushdownable. On the reliability axis (RQ6), the three-layer integrity stack drives the
 silently-wrong-number rate to zero and closes the numeric verifier's wrong-formula blind spot (TB.1 0/6 → +TB.3
 4/6 → +TB.2 6/6) via deterministic governed metrics + execution-voting. Beyond the canonical results, the
 residual-risk surface is regression-gated by an exhaustive ORM-pivot **red-team grammar** (residual-leak 0/41);

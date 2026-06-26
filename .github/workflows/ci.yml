@@ -28,6 +28,7 @@ jobs:
           python tests/test_policy_closure.py
           python tests/test_policy_scan.py
           python tests/test_policy_emit.py
+          python tests/test_endemic.py
           python tests/test_policy_model.py
           python tests/test_docrag.py
           python tests/test_agent_loop.py

@@ -1,0 +1,154 @@
+model,rule,fields,governance_fields,pushdownable,reason
+account.account,Account multi-company,company_ids,company_ids,False,op:parent_of
+account.analytic.account,Analytic multi company rule,company_id,company_id,False,or/not;op:parent_of
+account.analytic.applicability,Analytic applicability multi company rule,company_id,company_id,False,or/not;op:parent_of
+account.analytic.distribution.model,Analytic distribution model multi company rule,company_id,company_id,False,or/not;op:parent_of
+account.analytic.line,account.analytic.line.billing.user,(none),(none),False,no-field
+account.analytic.line,account.analytic.line.readonly.user,(none),(none),False,no-field
+account.analytic.line,Analytic line multi company rule,company_id,company_id,True,simple
+account.bank.statement,Account bank statement company rule,company_id,company_id,True,simple
+account.bank.statement.line,Account bank statement line company rule,company_id,company_id,True,simple
+account.fiscal.position,Account fiscal Mapping company rule,company_id,company_id,False,op:parent_of
+account.group,Account Group multi-company,company_id,company_id,False,op:parent_of
+account.invoice.report,All Invoices Analysis,(none),(none),False,no-field
+account.invoice.report,Invoice Analysis multi-company,company_id,company_id,True,simple
+account.invoice.report,Personal Invoices Analysis,invoice_user_id,invoice_user_id,False,or/not
+account.journal,Journal multi-company,company_id,company_id,False,op:parent_of
+account.journal.group,Multi-ledger multi-company,company_id,company_id,False,or/not;op:parent_of
+account.move,All Journal Entries,(none),(none),False,no-field
+account.move,Readonly Move,(none),(none),False,no-field
+account.move,Readonly Move,(none),(none),False,no-field
+account.move,Account Entry,company_id,company_id,True,simple
+account.move,Personal Invoices,"invoice_user_id,move_type",invoice_user_id,False,or/not;multi-field
+account.move,Purchase User Account Move,move_type,(none),True,simple
+account.move,All Invoices,move_type,(none),True,simple
+account.move,Portal Personal Account Invoices,"move_type,partner_id,state",partner_id,False,"multi-field;op:child_of,not in"
+account.move.line,All Journal Items,(none),(none),False,no-field
+account.move.line,Readonly Move Line,(none),(none),False,no-field
+account.move.line,Readonly Move Line,(none),(none),False,no-field
+account.move.line,Entry lines,company_id,company_id,True,simple
+account.move.line,Personal Invoice Lines,"invoice_user_id,move_type",invoice_user_id,False,or/not;multi-field
+account.move.line,Purchase User Account Move Line,move_type,(none),True,simple
+account.move.line,All Invoice Lines,move_type,(none),True,simple
+account.move.line,Portal Invoice Lines,"move_type,parent_state,partner_id",partner_id,False,"multi-field;op:child_of,not in"
+account.payment,Account payment company rule,company_id,company_id,True,simple
+account.payment.term,Account payment term company rule,company_id,company_id,False,or/not;op:parent_of
+account.reconcile.model,Account reconcile model template company rule,company_id,company_id,False,op:parent_of
+account.reconcile.model.line,Account reconcile model_line template company rule,company_id,company_id,False,op:parent_of
+account.report.external.value,Report External Value multi-company,company_id,company_id,True,simple
+account.tax,Tax multi-company,company_id,company_id,False,op:parent_of
+account.tax.group,Tax group multi-company,company_id,company_id,False,op:parent_of
+account.tax.repartition.line,Tax Repartition multi-company,company_id,company_id,False,or/not;op:parent_of
+crm.activity.report,All Activities,(none),(none),False,no-field
+crm.activity.report,CRM Lead Multi-Company,company_id,company_id,True,simple
+crm.activity.report,Personal Activities,user_id,user_id,False,or/not
+crm.lead,All Leads,(none),(none),False,no-field
+crm.lead,CRM Lead Multi-Company,company_id,company_id,True,simple
+crm.lead,Personal Leads,user_id,user_id,False,or/not
+crm.team,All Salesteam,(none),(none),False,no-field
+crm.team,Sales Team multi-company,company_id,company_id,True,simple
+fleet.vehicle,Administrator has all rights on vehicle,(none),(none),False,empty
+fleet.vehicle,Fleet vehicle: Multi Company,company_id,company_id,True,simple
+fleet.vehicle,Hr Officer read rights on vehicle with employees assigned,"driver_employee_id,future_driver_employee_id",(none),False,or/not;multi-field;op:!=
+fleet.vehicle.cost.report,Costs Analysis: Multi Company,company_id,company_id,True,simple
+fleet.vehicle.log.contract,Administrator has all rights on vehicle's contracts,(none),(none),False,empty
+fleet.vehicle.log.contract,Fleet vehicle log contract: Multi Company,company_id,company_id,True,simple
+fleet.vehicle.log.services,Administrator has all rights on vehicle's services,(none),(none),False,empty
+fleet.vehicle.log.services,Fleet log services: Multi Company,company_id,company_id,True,simple
+fleet.vehicle.odometer,Administrator has all rights on vehicle's vehicle's odometer,(none),(none),False,empty
+fleet.vehicle.odometer,Fleet odometer: Multi Company,company_id,company_id,True,simple
+hr.contract.type,HR Contract Type: Multi Company,country_id,country_id,False,or/not
+hr.department,Department multi company rule,company_id,company_id,True,simple
+hr.departure.reason,Departure Reason: multi company,country_code,country_code,True,simple
+hr.employee,Employee multi company rule,"company_id,id,user_id","company_id,id,user_id",False,or/not;multi-field
+hr.employee.location,homeworking: admin,(none),(none),False,no-field
+hr.employee.location,homeworking: own,employee_id,employee_id,True,simple
+hr.employee.public,Employee multi company rule,"company_id,id,user_id","company_id,id,user_id",False,or/not;multi-field
+hr.employee.skill,Employee skill: employee: read all,(none),(none),False,no-field
+hr.employee.skill,Employee skill: HR user: read all,(none),(none),False,no-field
+hr.employee.skill,Employee skill: employee: create/write/unlink own,user_id,user_id,True,simple
+hr.job,Job multi company rule,company_id,company_id,True,simple
+hr.payroll.structure.type,HR Payroll Structure Type: Multi Company,country_id,country_id,False,or/not
+hr.resume.line,Resume: employee: read all,(none),(none),False,no-field
+hr.resume.line,Resume: HR user: all,(none),(none),False,no-field
+hr.resume.line,Resume: employee: create/write/unlink own,user_id,user_id,True,simple
+hr.version,HR Contract: Contract Manager,(none),(none),False,no-field
+hr.version,HR Contract: Multi Company,company_id,company_id,True,simple
+maintenance.equipment,Equipment administrator,(none),(none),False,no-field
+maintenance.equipment,Maintenance Equipment Multi-company rule,company_id,company_id,True,simple
+maintenance.equipment,Users are allowed to access equipment they follow,message_partner_ids,message_partner_ids,True,simple
+maintenance.equipment.category,Maintenance Equipment Category Multi-company rule,company_id,company_id,True,simple
+maintenance.request,Administrator of maintenance requests,(none),(none),False,no-field
+maintenance.request,Maintenance Request Multi-company rule,company_id,company_id,True,simple
+maintenance.request,Users are allowed to access their own maintenance requests,"message_partner_ids,owner_user_id,user_id","message_partner_ids,owner_user_id,user_id",False,or/not;multi-field
+maintenance.team,Maintenance Team Multi-company rule,company_id,company_id,True,simple
+mrp.bom,mrp_bom multi-company,company_id,company_id,True,simple
+mrp.bom.byproduct,mrp_bom_byproduct multi-company,company_id,company_id,True,simple
+mrp.bom.line,mrp_bom_line multi-company,company_id,company_id,True,simple
+mrp.production,mrp_production multi-company,company_id,company_id,True,simple
+mrp.routing.workcenter,mrp_routing_workcenter multi-company,company_id,company_id,True,simple
+mrp.unbuild,mrp_unbuild multi-company,company_id,company_id,True,simple
+mrp.workcenter,mrp_workcenter multi-company,company_id,company_id,True,simple
+mrp.workcenter.productivity,mrp_workcenter_productivity multi-company,company_id,company_id,True,simple
+mrp.workorder,mrp_workorder multi-company,company_id,company_id,True,simple
+project.collaborator,Project/Collaborator: portal users: can only see his own collobaroration in shar,"partner_id,privacy_visibility",partner_id,False,multi-field
+project.milestone,Project/Milestone: Project manager can see all project milestones,(none),(none),False,no-field
+project.milestone,Project/Milestone: multi-company,company_id,company_id,False,or/not
+project.milestone,Project/Milestone: employees: follow required for follower-only projects,"message_partner_ids,privacy_visibility,user_id","message_partner_ids,user_id",False,or/not;multi-field
+project.milestone,Project/milestone portal users: portal user can read with project sharing featur,"partner_id,privacy_visibility",partner_id,False,multi-field
+project.project,Project: project manager: see all,(none),(none),False,no-field
+project.project,Project: multi-company,company_id,company_id,True,simple
+project.project,Project: employees: following required for follower-only projects,"message_partner_ids,privacy_visibility",message_partner_ids,False,or/not;multi-field
+project.project,Project: portal users: portal and following,"message_partner_ids,privacy_visibility",message_partner_ids,False,multi-field;op:child_of
+project.project.stage,Project Stage: multi-company,company_id,company_id,True,simple
+project.task,Project/Task: portal users: can only see a task if he's a collaborator of the pr,"active,collaborator_ids,limited_access,message_partner_ids,partner_id,privacy_visibility","collaborator_ids,message_partner_ids,partner_id",False,"or/not;multi-field;op:any,child_of"
+project.task,Project/Task: multi-company,company_id,company_id,True,simple
+project.task,Project/Task: employees: follow required for follower-only projects,"message_partner_ids,privacy_visibility,project_id,user_ids","message_partner_ids,user_ids",False,or/not;multi-field;op:!=
+project.task,Project/Task: project users: follow required for follower-only projects,"message_partner_ids,privacy_visibility,project_id,user_ids","message_partner_ids,user_ids",False,or/not;multi-field;op:!=
+project.task,Project: See private tasks,"parent_id,privacy_visibility,project_id,user_ids",user_ids,False,or/not;multi-field;op:!=
+project.task,Project/Task: employees: Full access to own private task only,"parent_id,project_id,user_ids",user_ids,False,multi-field
+project.task,Project/Task: project manager: see all tasks linked to a project or its own task,"project_id,user_ids",user_ids,False,or/not;multi-field;op:!=
+project.task.stage.personal,Project: See my own personal stage,user_id,user_id,True,simple
+project.task.type,Project/Task Type: manager sees all,(none),(none),False,no-field
+project.task.type,Project/Task Type: see own or unowned stages,user_id,user_id,True,simple
+project.task.type,Project/Task Type: write own stages,user_id,user_id,True,simple
+project.update,Project updates : Project user can see all project updates,(none),(none),False,no-field
+project.update,Project/Updates: multi-company,company_id,company_id,False,or/not
+project.update,Project/Update: employees: follow required for follower-only projects,"message_partner_ids,privacy_visibility,user_id","message_partner_ids,user_id",False,or/not;multi-field
+purchase.bill.union,Purchases & Bills Union multi-company,company_id,company_id,True,simple
+purchase.order,Purchase Order multi-company,company_id,company_id,True,simple
+purchase.order,Portal Purchase Orders,partner_id,partner_id,False,op:child_of
+purchase.order.line,Purchase Order Line multi-company,company_id,company_id,True,simple
+purchase.order.line,Portal Purchase Order Lines,partner_id,partner_id,False,op:child_of
+purchase.report,Purchase Order Report multi-company,company_id,company_id,True,simple
+repair.order,repair order multi-company,company_id,company_id,True,simple
+sale.order,All Orders,(none),(none),False,no-field
+sale.order,Sales Order multi-company,company_id,company_id,True,simple
+sale.order,Portal Personal Quotations/Sales Orders,partner_id,partner_id,False,op:child_of
+sale.order,Personal Orders,user_id,user_id,False,or/not
+sale.order.line,All Orders Lines,(none),(none),False,no-field
+sale.order.line,Stock User Sales Orders Line,(none),(none),False,no-field
+sale.order.line,Sales Order Line multi-company,company_id,company_id,True,simple
+sale.order.line,Project Manager Sales Orders Line,"is_service,project_id,state,task_id",(none),False,or/not;multi-field;op:!=
+sale.order.line,Portal Sales Orders Line,partner_id,partner_id,False,op:child_of
+sale.order.line,Personal Order Lines,salesman_id,salesman_id,False,or/not
+sale.order.template,Quotation Template multi-company,company_id,company_id,True,simple
+sale.report,All Orders Analysis,(none),(none),False,no-field
+sale.report,Sales Order Analysis multi-company,company_id,company_id,True,simple
+sale.report,Personal Orders Analysis,user_id,user_id,False,or/not
+stock.location,Location multi-company,company_id,company_id,True,simple
+stock.lot,Stock Production Lot multi-company,company_id,company_id,True,simple
+stock.move,stock_move multi-company,company_id,company_id,True,simple
+stock.move.line,stock_move_line multi-company,company_id,company_id,True,simple
+stock.package,stock_package multi-company,company_id,company_id,True,simple
+stock.picking,stock_picking multi-company,company_id,company_id,True,simple
+stock.picking,Portal Follower Transfers,partner_id,partner_id,False,or/not
+stock.picking.type,Stock Operation Type multi-company,company_id,company_id,True,simple
+stock.putaway.rule,Stock Operation Type multi-company,company_id,company_id,True,simple
+stock.quant,stock_quant multi-company,company_id,company_id,True,simple
+stock.route,stock_route multi-company,company_id,company_id,True,simple
+stock.rule,product_pulled_flow multi-company,company_id,company_id,True,simple
+stock.scrap,stock_scrap_company multi-company,company_id,company_id,True,simple
+stock.storage.category,stock_storage_category multi-company,company_id,company_id,True,simple
+stock.warehouse,Warehouse multi-company,company_id,company_id,True,simple
+stock.warehouse.orderpoint,stock_warehouse.orderpoint multi-company,company_id,company_id,True,simple

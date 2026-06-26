@@ -1,0 +1,10 @@
+domain,gaps,at_risk,rate
+account,3,6,0.5
+crm,1,1,1.0
+hr,5,7,0.714
+mrp,0,2,0.0
+project,3,4,0.75
+purchase,0,2,0.0
+sale,2,4,0.5
+stock,1,1,1.0
+TOTAL,15,27,0.556
