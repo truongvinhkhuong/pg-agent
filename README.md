@@ -48,6 +48,7 @@ pg-agent/
 │   ├── adaptive.py                 # T4.5 adaptive-probing variant suite
 │   ├── policy_closure.py           # F10: pure closure-derivation core — derive_closures + derive_gaps (no Odoo)
 │   ├── domain_ast.py               # F10: pure ir.rule domain extractor (parse_domain + governance_fields)
+│   ├── policy_emit.py              # F10 Increment 2: pure emit core (POLICY + native ir.rule, no Odoo)
 │   └── attacks_experimental.py     # ungrounded generality demos (ownership-bypass)
 ├── tests/
 │   ├── evaluation_script.py        # benchmark harness -> environment × attack matrix + metrics
@@ -56,7 +57,8 @@ pg-agent/
 │   ├── test_output_validator.py    # offline pytest (no Odoo)
 │   ├── test_sensitivity_registry.py  # offline pytest (no Odoo)
 │   ├── test_policy_closure.py      # offline pytest — closure-derivation core (no Odoo)
-│   └── test_policy_scan.py         # offline pytest — derive_gaps + governance_fields (no Odoo)
+│   ├── test_policy_scan.py         # offline pytest — derive_gaps + governance_fields (no Odoo)
+│   └── test_policy_emit.py         # offline pytest — emit core (no Odoo)
 ├── config/
 │   ├── odoo.mock.conf              # PUBLIC mode (no private path)
 │   └── odoo.prod.conf              # PRIVATE/validation mode
@@ -244,7 +246,29 @@ Result (62 models, 15 containment edges, 6 discriminators; committed in
 
 The pure derivation core (`policy_closure.derive_gaps`) + the AST extractor are offline-unit-tested by
 [`tests/test_policy_scan.py`](tests/test_policy_scan.py) (20 cases incl. the audit-FK-closure regression).
-**Increment 2** (future) emits `ir.rule`/`POLICY` from the derived closures + runtime-verifies gap closure.
+
+### Emit + verify (F10 Increment 2)
+
+The final step closes the loop: **emit** the derived closures as an enforceable artifact and **runtime-verify**
+they close the gaps ([`data/erp_authzbench/policy_emit.py`](data/erp_authzbench/policy_emit.py), offline-tested by
+[`tests/test_policy_emit.py`](tests/test_policy_emit.py)).
+
+- **pco mock (end-to-end, runtime-verified):** [`policy_linter.emit_verify`](tests/policy_linter.py) emits a guard
+  `POLICY` dict from the derived closures, asserts it **reproduces the hand-written `POLICY`** on the team/company
+  axes (owner is a local field, out of closure scope → `None`), then **rebinds the guard's `POLICY` to the emitted
+  one and re-runs `ci_gate`** → `BENCH_GATE: PASS` (the guard driven by the *auto-emitted* policy is leak-free, same
+  as hand-written; `ci_gate`'s `noguard_leaks ≥ 3` gate is the meaningfulness contrast). So the bespoke `POLICY`
+  table is **derivable, not hand-authored**.
+- **real Odoo CE (emit-classify, read-only):** [`policy_scan.emit_classify`](tests/policy_scan.py) proposes a native
+  `ir.rule` per gap, **gated on the PARENT rule's pushdownability** ([`results/scale/emit.csv`](results/scale/emit.csv)).
+  Honest result: **1 of 5** gaps is soundly emittable (`stock.storage.category.capacity` →
+  `[('storage_category_id.company_id','in',company_ids)]`); the other **4 are `manual-review`** because their parent
+  rule is OR / `parent_of` / multi-field — we **refuse to push a complex parent domain into one child leaf** (not
+  sound in general). That honest 1/5 is the real soundness frontier, surfaced by `parse_domain`, not hidden.
+
+This proves the `POLICY` is mechanically derivable + enforces identically at runtime, and that native-rule emission
+is sound exactly where the parent rule is pushdownable. It does **not** claim novel soundness on arbitrary domains
+(4/5 manual-review by design), owner-axis derivability, or anything beyond read operations.
 
 Repeat after switching `pco_core_mock/__manifest__.py` to `team_security_vrule.xml` and
 reinstalling (`-u pco_core_mock`) to produce the V-rule row of the matrix —

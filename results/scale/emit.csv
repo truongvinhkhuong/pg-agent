@@ -1,0 +1,6 @@
+module,model,discriminator,relation_path,definer_model,parent_pushdownable,parent_reason,emit_status,emitted_domain
+account,account.bank.statement.line,invoice_user_id,move_id.invoice_user_id,account.move,False,or/not;multi-field,manual-review:or/not;multi-field,
+account,account.fiscal.position.account,company_id,position_id.company_id,account.fiscal.position,False,op:parent_of,manual-review:op:parent_of,
+account,account.payment.term.line,company_id,payment_id.company_id,account.payment.term,False,or/not;op:parent_of,manual-review:or/not;op:parent_of,
+sale,sale.order.line,user_id,order_id.user_id,sale.order,False,or/not,manual-review:or/not,
+stock,stock.storage.category.capacity,company_id,storage_category_id.company_id,stock.storage.category,True,simple,pushdownable,"[('storage_category_id.company_id', 'in', company_ids)]"

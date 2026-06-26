@@ -146,3 +146,43 @@ def lint_gate(env):
         return False
     print("POLICY_LINT_GATE: PASS")
     return True
+
+
+def emit_verify(env):
+    """F10 Increment 2 (pco): EMIT the guard POLICY from derived closures, then VERIFY by
+    rebinding the guard's POLICY to the emitted one and re-running ERP-AuthZBench.
+
+    Proves the bespoke POLICY is derivable: emitted == hand-written on the relational-closure
+    axes (team/company; owner_path is a local field, out of scope), and a guard driven by the
+    EMITTED policy is leak-free (ci_gate PASS, whose built-in `noguard_leaks>=3` gate is the
+    meaningfulness contrast — the native ir.rule plane leaks on child attacks, the emit does not).
+    Rebinds the MODULE attribute (the oracle's imported POLICY binding is untouched) and restores
+    it in `finally`.
+    """
+    import odoo.addons.pg_agent_guard.models.pep_guard as pg
+    from policy_emit import emit_policy
+
+    records = _lint_core(env)
+    emitted = emit_policy(records)
+
+    print("\n=== F10 Increment 2 — emit + verify (pco) ===")
+    eq = True
+    for model, hand in POLICY.items():           # POLICY = the ORACLE binding (unchanged)
+        e = emitted.get(model, {})
+        if e.get("team_path") != hand.get("team_path") or e.get("company_path") != hand.get("company_path"):
+            eq = False
+            print(f"  MISMATCH {model}: emitted={e} hand-written={hand}")
+    print(f"emitted POLICY reproduces hand-written (team/company): {eq}  "
+          f"(owner_path out of closure scope -> None by design)")
+
+    orig = pg.POLICY
+    try:
+        pg.POLICY = emitted                      # the GUARD now enforces the emitted closures
+        print("-- ci_gate with the EMITTED POLICY driving the guard --")
+        gate_ok = ci_gate(env)
+    finally:
+        pg.POLICY = orig                         # always restore
+    ok = eq and gate_ok
+    print(f"EMIT_VERIFY: {'PASS' if ok else 'FAIL'} "
+          f"(equivalence={eq}, ci_gate_under_emit={gate_ok})")
+    return ok

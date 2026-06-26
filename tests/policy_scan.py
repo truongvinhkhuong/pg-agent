@@ -207,3 +207,53 @@ def scan(env, modules=DEFAULT_MODULES, outdir="results/scale"):
                sorted(rule_rows, key=lambda x: (x["model"], x["fields"])))
     print(f"\nWrote coverage.csv ({len(cov_rows)} reachable rows), rules.csv ({len(rule_rows)}) -> {outdir}/\n")
     return records, metric
+
+
+def _parent_rule_by_key(rule_rows):
+    """(definer_model, field) -> (pushdownable, reason). A gap's parent rule is pushdownable
+    only if EVERY active rule governing that (model, field) is simple; else the first complex
+    reason (we refuse to emit when any governing rule is non-pushdownable)."""
+    acc = {}
+    for rr in rule_rows:
+        gfs = [g for g in rr["governance_fields"].split(",") if g and g != "(none)"]
+        for f in gfs:
+            acc.setdefault((rr["model"], f), []).append((rr["pushdownable"], rr["reason"]))
+    out = {}
+    for key, lst in acc.items():
+        if all(p for p, _ in lst):
+            out[key] = (True, "simple")
+        else:
+            out[key] = next((False, reason) for p, reason in lst if not p)
+    return out
+
+
+def emit_classify(env, modules=DEFAULT_MODULES, outdir="results/scale"):
+    """F10 Increment 2 (real Odoo, READ-ONLY): for each discovered GAP, emit the proposed
+    native ir.rule domain — gated on the PARENT rule's pushdownability — or flag manual-review.
+    Writes <outdir>/emit.csv. Does NOT install anything."""
+    from policy_emit import classify_emit
+
+    scope, by_module = _scope_models(env, modules)
+    edges = _build_edges(env, scope)
+    ruled, rule_rows = _build_ruled(env, scope)
+    defines, mirrors = _build_defines(env, scope, set(ruled))
+    records = derive_gaps(edges, defines, ruled, scope, exclude_self_definer=mirrors)
+    gaps = [r for r in records if r["verdict"] == "GAP"]
+
+    parents = _parent_rule_by_key(rule_rows)
+    rows, n_push = classify_emit(gaps, parents)
+    for r in rows:                                   # decorate with owning module
+        r["module"] = by_module.get(r["model"], "")
+
+    print(f"\n=== F10 Increment 2 — emit-classify (real Odoo: {','.join(modules)}) ===")
+    print(f"EMIT: {n_push} pushdownable / {len(gaps)} GAPs ({len(gaps) - n_push} manual-review)")
+    for r in sorted(rows, key=lambda x: x["emit_status"] != "pushdownable"):
+        print(f"  [{r['emit_status']:<22}] {r['model']:<34} {r['emitted_domain'] or '('+r['parent_reason']+')'}")
+
+    os.makedirs(outdir, exist_ok=True)
+    _write_csv(os.path.join(outdir, "emit.csv"),
+               ["module", "model", "discriminator", "relation_path", "definer_model",
+                "parent_pushdownable", "parent_reason", "emit_status", "emitted_domain"],
+               sorted(rows, key=lambda x: (x["module"], x["model"], x["discriminator"])))
+    print(f"Wrote emit.csv ({len(rows)} rows) -> {outdir}/\n")
+    return rows
