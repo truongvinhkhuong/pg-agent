@@ -1467,6 +1467,7 @@ def export_results(env, outdir="results"):
         json.dump({"plane_comparison": plane, "ablation": abl,
                    "adaptive_probing": adp, "denial_channel": denial},
                   fh, ensure_ascii=False, indent=2)
+        fh.write("\n")          # trailing newline -> byte-stable + POSIX-clean (matches committed reference)
     print(f"\nWrote plane_comparison.csv, ablation.csv, adaptive_probing.csv, "
           f"denial_channel.csv, results.json -> {outdir}/")
     return {"plane_comparison": plane, "ablation": abl,

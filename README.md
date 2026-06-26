@@ -259,6 +259,21 @@ real-LLM wrong-formula rate (candidates/metric-selection are planted; mechanism 
 
 ## Run the benchmark (mock, no private access)
 
+**One command (Artifact Evaluation).** A reviewer with Docker can regenerate the paper's core tables and
+watch the gate pass — fully isolated, real containers untouched. See **[REPRODUCE.md](REPRODUCE.md)** for the
+claim → command → output → paper-§ map and honest caveats.
+
+```bash
+make test          # offline unit suites (no Docker/LLM/network) — seconds
+make reproduce     # isolated postgres:16 + odoo:19; regenerate the core tables, BYTE-DIFF vs committed,
+                   # gate on both schema variants -> "REPRODUCE: PASS"
+make reproduce-all # + RQ6/RQ7/RQ8 / agent-loop / LLM-replay drivers
+make scale         # CE-corpus endemicity + soundness frontier (installs ~11 CE apps; structural compare)
+make clean         # tear down ONLY the isolated `pgagent-ae` stack
+```
+
+The manual path below is for a source install (no Docker):
+
 ```bash
 # 1) Offline unit tests — no Odoo, no LLM needed (validator + sensitivity registry):
 python -m pytest tests/test_output_validator.py tests/test_sensitivity_registry.py

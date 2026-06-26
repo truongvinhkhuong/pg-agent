@@ -1,0 +1,38 @@
+# Artifact-Evaluation entry points for pg-agent / ERP-AuthZBench. See REPRODUCE.md.
+# Tiers:  test (offline, seconds)  <  reproduce (core, ~min)  <  reproduce-all  <  scale (CE apps, ~min).
+.PHONY: help test reproduce reproduce-all scale lint clean
+PY ?= python3
+
+# The offline unit tests (no Odoo, no LLM, no network) — mirrors CI static-checks.
+OFFLINE := test_output_validator test_sensitivity_registry test_policy_closure test_policy_scan \
+           test_policy_emit test_pushdown_soundness test_policy_model test_numeric_verifier \
+           test_metrics_and_consistency test_redteam test_docrag test_agent_loop test_endemic
+
+help:
+	@echo "make test          # offline unit tests (no Docker/LLM/network) — seconds"
+	@echo "make reproduce     # regenerate + BYTE-DIFF the core paper tables, gate on both variants (Docker) — ~3-5 min"
+	@echo "make reproduce-all # + RQ6/RQ7/RQ8 / agent-loop / LLM-replay drivers"
+	@echo "make scale         # CE corpus endemicity + soundness frontier (installs ~11 CE apps) — ~10-20 min"
+	@echo "make lint          # pre-commit: detect-secrets + raw-data regression gate"
+	@echo "make clean         # tear down the isolated pgagent-ae compose stack"
+
+test:
+	@set -e; for t in $(OFFLINE); do $(PY) tests/$$t.py >/dev/null && echo "ok: $$t"; done
+	@echo "offline tests: PASS ($(words $(OFFLINE)) suites)"
+
+reproduce:
+	@bash tools/reproduce.sh
+
+reproduce-all:
+	@bash tools/reproduce.sh --all
+
+scale:
+	@bash tools/scale_scan.sh
+
+lint:
+	@pre-commit run --all-files
+
+clean:
+	@docker compose -p pgagent-ae down -v 2>/dev/null || true
+	@rm -rf results/repro results/scale/repro
+	@echo "cleaned: pgagent-ae stack + results/repro"

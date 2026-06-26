@@ -1,0 +1,37 @@
+# Isolated Artifact-Evaluation stack for pg-agent / ERP-AuthZBench.
+#
+# `name: pgagent-ae` pins the compose project -> its OWN network (pgagent-ae_default), named
+# volume (pgagent-ae_pgdata), and pgagent-ae-* containers. It CANNOT touch any container you run
+# outside this repo. `make clean` (docker compose -p pgagent-ae down -v) removes only pgagent-ae_*.
+#
+# Driven by tools/reproduce.sh, which uses `compose run --entrypoint odoo` with EXPLICIT
+# --db_host=db / --addons-path flags (the proven, deterministic path). See REPRODUCE.md.
+name: pgagent-ae
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_DB: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust   # ephemeral AE database, no password, synthetic data only
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  odoo:
+    image: odoo:19
+    depends_on:
+      db:
+        condition: service_healthy
+    user: root
+    working_dir: /repo
+    volumes:
+      - ./:/repo                          # the public repo (no private code, no .env needed)
+
+volumes:
+  pgdata:
