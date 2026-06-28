@@ -295,6 +295,15 @@ loop **discover → derive → emit → enforce → verify**. Pure cores
 [`policy_emit.py`](../data/erp_authzbench/policy_emit.py)) are offline-unit-tested; drivers run in an Odoo
 shell, read-only.
 
+```mermaid
+flowchart LR
+  D1["discover<br/>models + M2O graph"] --> D2["derive<br/>BFS relation-path closure"]
+  D2 --> D3["emit<br/>native ir.rule"]
+  D3 --> D4["enforce<br/>PG-Agent PEP"]
+  D4 --> D5["verify<br/>runtime gap-closure"]
+  G["soundness gate (§5.3.1)<br/>emit only where pushdownable"] -.-> D3
+```
+
 ### 5.1 Differential linter on the mock · [`policy_lint.csv`](../results/policy_lint.csv)
 
 From `ir.model.fields` + `ir.rule`, classify each `(model, axis)` as GOVERNED/GAP/ROOT-UNGOVERNED and derive
@@ -441,6 +450,21 @@ class and the same predicate-pushdown fix** on a second, independently-specified
 confused-deputy / BOLA traversal; and an **inline-`EXISTS` child policy** ≈ the PEP's forced derived row-domain
 (T1.2). A governed parent `orders` (tenant-isolation policy, `ENABLE` + `FORCE ROW LEVEL SECURITY`) has an
 ungoverned FK-child `order_lines`; the agent queries the child directly.
+
+```mermaid
+flowchart LR
+  subgraph Odoo["Odoo ORM record rules"]
+    direction TB
+    O1["team ir.rule domain"] ~~~ O2["child model with no rule"] ~~~ O3["PEP write-check"]
+  end
+  subgraph PG["PostgreSQL RLS"]
+    direction TB
+    P1["CREATE POLICY ... USING"] ~~~ P2["table with RLS not enabled"] ~~~ P3["WITH CHECK"]
+  end
+  O1 -. "≈" .-> P1
+  O2 -. "≈" .-> P2
+  O3 -. "≈" .-> P3
+```
 
 The probe runs as a dedicated **`app_user` (`NOSUPERUSER NOBYPASSRLS`)** role — a superuser or table owner would
 *bypass* RLS and make the demonstration vacuous, so each run also emits an in-band **positive control**: the

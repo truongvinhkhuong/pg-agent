@@ -27,8 +27,10 @@
 \usepackage{amssymb}         % \square (soundness-theorem QED marker, §5.3.1)
 \usepackage{booktabs}
 \usepackage{array}
-\usepackage{tikz}            % Fig.1 architecture / threat model
+\usepackage{tikz}            % Fig.1/F4/F6 diagrams
 \usetikzlibrary{positioning,arrows.meta,calc}
+\usepackage{pgfplots}        % Fig.5 endemicity bar chart
+\pgfplotsset{compat=1.18}
 \usepackage{geometry}
 \geometry{margin=1in}
 \usepackage{enumitem}
@@ -250,24 +252,32 @@ Row+field leak rate: inherited-RBAC \textbf{5/6}, action-authz \textbf{5/6}, PG-
 Only the data-result-plane PEP closes the case.
 
 \subsection{Defense-in-depth ablation (V-vuln)}
-\code{results/ablation.csv}.
+\code{results/ablation.csv}. Figure~\ref{fig:ablation} is the ladder.
 
-\begin{center}\small
+% mirrors results/ablation.csv ; red = metric still open, green = closed; bold = the layer that closes it.
+\begin{figure}[t]
+\centering
+\setlength{\tabcolsep}{7pt}\renewcommand{\arraystretch}{1.2}\small
+\newcommand{\op}[1]{\cellcolor{red!15}#1}
+\newcommand{\cl}[1]{\cellcolor{green!18}#1}
 \begin{tabular}{@{}lcccc@{}}
 \toprule
-rung & Unauthorized & DataLeakage & AnswerLeak & Existence-Inf \\
+\textbf{Defense rung} & \textbf{Unauthorized} & \textbf{Data-leak} & \textbf{Answer-leak} & \textbf{Existence} \\
 \midrule
-no-defense (sudo)        & 4/4 & 2/2 & leak & infer \\
-+ir.rule (native)        & 3/4 & 2/2 & leak & infer \\
-+PEP (row-domain)        & \textbf{0/4} & 2/2 & leak & infer \\
-+masking                 & 0/4 & \textbf{0/2} & leak & infer \\
-+output-validation       & 0/4 & 0/2 & \textbf{safe} & infer \\
-+uniform-denial          & 0/4 & 0/2 & safe & \textbf{0/1} \\
+no-defense (sudo)  & \op{4/4} & \op{2/2} & \op{leak} & \op{infer} \\
++ ir.rule (native) & \op{3/4} & \op{2/2} & \op{leak} & \op{infer} \\
++ PEP (row-domain) & \cl{\textbf{0/4}} & \op{2/2} & \op{leak} & \op{infer} \\
++ masking          & \cl{0/4} & \cl{\textbf{0/2}} & \op{leak} & \op{infer} \\
++ output-validation& \cl{0/4} & \cl{0/2} & \cl{\textbf{safe}} & \op{infer} \\
++ uniform-denial   & \cl{0/4} & \cl{0/2} & \cl{safe} & \cl{\textbf{0/1}} \\
 \bottomrule
 \end{tabular}
-\end{center}
-
-Each layer zeroes exactly one metric $\to$ defense-in-depth is necessary (no layer is redundant).
+\caption{\textbf{Defense-in-depth ablation (V-vuln).} Each rung adds one layer; red = the metric is still open,
+green = closed (bold = the layer that closes it). The staircase shows each layer zeroes a \emph{distinct} metric
+(PEP$\to$Unauthorized, masking$\to$Data-leak, output-validation$\to$Answer-leak, uniform-denial$\to$Existence) ---
+no layer is redundant. Mirrors \code{results/ablation.csv}.}
+\label{fig:ablation}
+\end{figure}
 
 \subsection{Adaptive probing --- residual risk}
 \code{results/adaptive_probing.csv}. 14 pivot variants test whether the PEP holds as an adversary switches
@@ -355,9 +365,30 @@ cannot establish and the structural table can.
 % =====================================================================
 \section{PCC-ERP: a policy-closure compiler}
 PG-Agent's per-model row closures are a hand-written \code{POLICY} today. PCC-ERP \textbf{derives} them and
-closes the loop \textbf{discover $\to$ derive $\to$ emit $\to$ enforce $\to$ verify}. Pure cores
-(\code{policy_closure.py}, \code{domain_ast.py}, \code{policy_emit.py}) are offline-unit-tested; drivers run in
-an Odoo shell, read-only.
+closes the loop \textbf{discover $\to$ derive $\to$ emit $\to$ enforce $\to$ verify} (Figure~\ref{fig:pcc}). Pure
+cores (\code{policy_closure.py}, \code{domain_ast.py}, \code{policy_emit.py}) are offline-unit-tested; drivers run
+in an Odoo shell, read-only.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[font=\footnotesize,>=Latex,node distance=4mm and 9mm,
+  st/.style={draw,rounded corners,align=center,inner sep=3pt,minimum height=11mm,text width=20mm,fill=blue!5}]
+  \node[st] (disc) {\textbf{discover}\\models + M2O graph};
+  \node[st,right=of disc] (der) {\textbf{derive}\\BFS relation-path closure};
+  \node[st,right=of der] (emit) {\textbf{emit}\\native \texttt{ir.rule}};
+  \node[st,right=of emit] (enf) {\textbf{enforce}\\PG-Agent PEP};
+  \node[st,right=of enf] (ver) {\textbf{verify}\\runtime gap-closure};
+  \draw[->] (disc) -- (der); \draw[->] (der) -- (emit);
+  \draw[->] (emit) -- (enf); \draw[->] (enf) -- (ver);
+  \node[draw,dashed,rounded corners,below=5mm of emit,align=center,inner sep=2pt,font=\scriptsize,fill=yellow!12]
+    (gate) {soundness gate (\S5.3.1)\\emit only where pushdownable};
+  \draw[->,dashed] (gate) -- (emit);
+\end{tikzpicture}
+\caption{\textbf{PCC-ERP closes the policy loop.} Discover the ORM model + Many2one graph; derive each model's
+row-closure (the BFS relation-path to the team/company definer); emit a native \texttt{ir.rule} \emph{only}
+where the proved soundness gate (\S5.3.1) admits it; enforce via the PEP; runtime-verify gap closure.}
+\label{fig:pcc}
+\end{figure}
 
 \subsection{Differential linter on the mock}
 \code{results/policy_lint.csv}. From \code{ir.model.fields} + \code{ir.rule}, classify each
@@ -407,20 +438,32 @@ model (one reachable through a containment edge to a parent enforcing a context-
 The 3-module baseline reproduces with \textbf{zero verdict drift} (the 5 known gaps unchanged; the rest are
 additions).
 
-\begin{center}\small
-\begin{tabular}{@{}lc@{\hskip 2em}lc@{}}
-\toprule
-domain & gaps / at-risk & domain & gaps / at-risk \\
-\midrule
-hr      & \textbf{5 / 7} & account  & \textbf{3 / 6} \\
-project & \textbf{3 / 4} & sale     & \textbf{2 / 4} \\
-crm     & \textbf{1 / 1} & stock    & \textbf{1 / 1} \\
-mrp     & 0 / 2          & purchase & 0 / 2 \\
-\bottomrule
-\end{tabular}
-\end{center}
+\begin{figure}[t]
+\centering
+% mirrors results/scale/corpus/endemic.csv (TOTAL row excluded)
+\begin{tikzpicture}
+\begin{axis}[
+  ybar, bar width=6pt, width=\linewidth, height=42mm,
+  enlarge x limits=0.09, ymin=0, ymajorgrids, font=\footnotesize,
+  ylabel={count}, ylabel near ticks,
+  symbolic x coords={hr,account,project,sale,crm,stock,mrp,purchase},
+  xtick=data, x tick label style={font=\scriptsize},
+  legend style={at={(0.98,0.96)},anchor=north east,font=\scriptsize,draw=none},
+  legend cell align=left]
+\addplot[draw=gray,fill=gray!25] coordinates
+  {(hr,7)(account,6)(project,4)(sale,4)(crm,1)(stock,1)(mrp,2)(purchase,2)};
+\addplot[draw=red!60!black,fill=red!35] coordinates
+  {(hr,5)(account,3)(project,3)(sale,2)(crm,1)(stock,1)(mrp,0)(purchase,0)};
+\legend{at-risk children, gaps}
+\end{axis}
+\end{tikzpicture}
+\caption{\textbf{Endemicity across 8 Odoo CE business domains.} Gaps (red) among at-risk children (gray) per
+domain: \textbf{15 gaps across 6 of 8 domains}, low per model but systematic; only mrp and purchase are clean.
+Mirrors \code{results/scale/corpus/endemic.csv}.}
+\label{fig:endemic}
+\end{figure}
 
-\textbf{15 gaps across 6 domains} (vs 5 across 3). \textbf{The finding is breadth, not frequency:} per
+\textbf{15 gaps across 6 domains} (vs 5 across 3, Figure~\ref{fig:endemic}). \textbf{The finding is breadth, not frequency:} per
 \emph{model} the gap is rare --- only 15 of 2{,}072 reachable child$\times$axis pairs (0.7\%) --- but among the
 at-risk population it is common and crosses nearly every domain (pooled 15/27; per-domain rate 0--1). Two
 domains (mrp, purchase) are clean. Endemic means \textbf{ubiquitous-across-domains and systematic} (the direct
@@ -490,11 +533,39 @@ domain context). \textbf{Honest: formalization, not new enforcement} --- it name
 vacuous on the synthetic data) is deliberately omitted.
 
 \subsection{Cross-system generality --- the gap is paradigm-level (RQ9)}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[font=\footnotesize,node distance=3mm,
+  o/.style={draw,rounded corners,align=center,inner sep=3pt,fill=blue!6,text width=37mm,minimum height=7mm},
+  p/.style={draw,rounded corners,align=center,inner sep=3pt,fill=green!7,text width=37mm,minimum height=7mm}]
+  \node[font={\small\bfseries}] (oh) {Odoo ORM record rules};
+  \node[font={\small\bfseries},right=46mm of oh] (ph) {PostgreSQL RLS};
+  \node[o,below=4mm of oh.west,anchor=north west] (o1) {team \code{ir.rule} domain};
+  \node[o,below=of o1] (o2) {child model with \emph{no} rule};
+  \node[o,below=of o2] (o3) {PEP write-check};
+  \node[o,below=of o3] (o4) {direct child read/write bypass};
+  \node[p,below=4mm of ph.west,anchor=north west] (p1) {\code{CREATE POLICY {\dots} USING}};
+  \node[p,below=of p1] (p2) {table with RLS \emph{not enabled}};
+  \node[p,below=of p2] (p3) {\code{WITH CHECK}};
+  \node[p,below=of p3] (p4) {per-relation governance gap};
+  \foreach \a/\b in {o1/p1,o2/p2,o3/p3,o4/p4}
+    \draw[dashed,gray] (\a.east) -- node[above=-1pt,font=\scriptsize]{$\approx$} (\b.west);
+\end{tikzpicture}
+\caption{\textbf{Odoo $\leftrightarrow$ PostgreSQL-RLS mapping (RQ9/RQ10).} The same relational-traversal gap
+class and the same predicate-pushdown fix appear on a second, independently-specified engine: a child without a
+row rule $\approx$ a table with RLS never enabled; the PEP's write-check $\approx$ Postgres \code{WITH CHECK}.
+Neither engine is ``broken'' --- both apply security per relation by design; an LLM agent operationalizes the
+misconfiguration by taking the direct-child path. Demonstrated leak $12/6 \to 6/0$ (\S5.5).}
+\label{fig:rls}
+\end{figure}
+
 \code{results/rls.csv}. Is the relational-traversal gap an Odoo quirk? No. We reproduce the \textbf{same gap
 class and the same predicate-pushdown fix} on a second, independently-specified enforcement engine ---
 \textbf{PostgreSQL Row-Level Security (RLS)} --- making good on the forward reference in \S1.2. The mapping is
-1:1: \code{CREATE POLICY} $\approx$ an \code{ir.rule}; a child table with \textbf{RLS never enabled} $\approx$ a
-child model without a record rule (the realistic header-only misconfiguration); a \textbf{direct read of the
+1:1 (Figure~\ref{fig:rls}): \code{CREATE POLICY} $\approx$ an \code{ir.rule}; a child table with \textbf{RLS
+never enabled} $\approx$ a child model without a record rule (the realistic header-only misconfiguration); a
+\textbf{direct read of the
 child} relation $\approx$ the confused-deputy/BOLA traversal; and an inline-\code{EXISTS} child policy
 $\approx$ the PEP's forced derived row-domain (T1.2). A governed parent \code{orders} (tenant-isolation policy,
 \code{ENABLE} + \code{FORCE ROW LEVEL SECURITY}) has an ungoverned FK-child \code{order\_lines}; the agent
