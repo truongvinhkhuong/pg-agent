@@ -71,7 +71,9 @@ exhausts the ORM-pivot space (T4.5+); (v) \textbf{formalize} the bespoke POLICY 
 domain (RQ7); (vi) extend the PEP to a \textbf{Doc-RAG retrieval plane} that delivers chunks only
 re-rendered from row-authorized, clearance-masked sources (RQ8); and (vii) show the gap is
 \textbf{paradigm-level, not an Odoo artifact} by reproducing the same relational-traversal leak and the same
-predicate-pushdown fix on a second engine, \textbf{PostgreSQL RLS} (RQ9).
+predicate-pushdown fix on a second engine, \textbf{PostgreSQL RLS} (RQ9); and (viii) extend the threat model to
+\textbf{mutations} --- a forced write-check (USING + WITH-CHECK) closes the confused-deputy \emph{write} gap on
+create/write/unlink (RQ10), 12/12 breaching writes held.
 
 The contribution is scoped honestly to \textbf{applied security + benchmark + reference implementation} for an
 under-served setting (ERP record-rule governance that is incomplete on child models), not to a novel
@@ -106,8 +108,10 @@ same pushdown fix on \textbf{PostgreSQL RLS in \S5.5 (RQ9)}.)
 Attacker = an employee probing beyond scope / prompt-injection / chaining, with a real role, natural-language
 prompts only, no code or policy edits, observing refusal responses + latency. Defender = a deterministic PEP
 at the data-result plane, with the \textbf{LLM kept outside the security boundary} (it does not decide
-authorization --- OrgAccess shows GPT-4.1 reaches only F1$\approx$0.27 on RBAC reasoning). Out of scope:
-infrastructure RCE, write/create/unlink, model extraction.
+authorization --- OrgAccess shows GPT-4.1 reaches only F1$\approx$0.27 on RBAC reasoning). The primary suite is
+\textbf{read-scoped}; \S4.7 (RQ10) deliberately \textbf{extends the threat model to mutations} --- an agent that
+issues \code{create}/\code{write}/\code{unlink} tool-calls --- with the same gap and the same pushdown fix on the
+write side. Out of scope: infrastructure RCE, bulk/workflow-state mutations, model extraction.
 
 % =====================================================================
 \section{ERP-AuthZBench}
@@ -146,6 +150,9 @@ A model-agnostic PEP (\code{pg_agent_guard}) the agent must call instead of the 
   \item \textbf{Uniform denial} --- identical empty result + constant-time/jitter, defeating
         existence-inference via the denial channel.
   \item \textbf{Independent audit} --- per-call decision log (stdlib, isolated from any AGPL audit module).
+  \item \textbf{Write-check (RQ10, \S4.7)} --- \code{guarded\_create}/\code{guarded\_write}/\code{guarded\_unlink}
+        add the mutation analogue: \textbf{USING} (a write/unlink target row must be in the forced row-domain) +
+        \textbf{WITH-CHECK} (any governed FK being set must resolve to an in-domain parent, read via sudo).
 \end{enumerate}
 
 % =====================================================================
@@ -231,9 +238,32 @@ Ablation \code{+ir.rule} improves to 2/4 (vs 3/4) but PEP is still needed for th
 CI (\code{.github/workflows/ci.yml}) installs the addons in \textbf{Odoo 19 + Postgres} and runs
 \code{ci_gate(env)} over \textbf{both variants}; it fails unless Unauthorized = Data-Leakage =
 Existence-Inference = False-Block = 0, \textbf{no in-scope adaptive RESIDUAL-LEAK}, \textbf{no in-scope variant
-of the automated red-team grammar survives} (\S4.3), and the benchmark is meaningful (attacks fire
-undefended). Any change that reopens a leak --- canonical path, a hand-picked pivot, \textbf{or} any
-enumerated grammar point --- turns CI red.
+of the automated red-team grammar survives} (\S4.3), \textbf{no in-scope write/mutation survives the write-check}
+(\S4.7), and the benchmark is meaningful (attacks fire undefended). Any change that reopens a leak --- canonical
+path, a hand-picked pivot, an enumerated grammar point, \textbf{or} a confused-deputy write --- turns CI red.
+
+\subsection{Write-path / mutation enforcement (RQ10)}
+\code{results/write_attacks.csv}. The read suite is read-scoped; here we \textbf{extend the threat model to
+mutations}. Native Odoo does \textbf{not} re-apply a parent's record rule when a child is mutated \emph{directly},
+so once an operational user holds coarse create/write/unlink ACL on the child models --- the realistic ERP
+misconfiguration (sales staff legitimately manage an order's lines/payments/guarantees, but the record-rule
+scoping is forgotten on the children) --- the \textbf{confused-deputy WRITE} opens: a team-restricted persona can
+create a payment on \emph{another team's} order, overwrite/delete a foreign child row, or reassign an owned child
+onto a foreign order. The PEP closes it with \code{guarded\_create}/\code{guarded\_write}/\code{guarded\_unlink}:
+\textbf{USING} (the target row must be in the forced row-domain) + \textbf{WITH-CHECK} (any governed FK being set
+must resolve to an in-domain parent). Over 4 families $\times$ 3 child models = \textbf{12 confused-deputy writes}:
+under \textbf{V-vuln} all \textbf{12/12 breach undefended} and the write-check holds \textbf{0/12} (all
+\code{held}); under \textbf{V-rule} the naive line rule blocks line create/overwrite/unlink (\code{non-firing})
+but \textbf{reassign-line and the payment/guarantee siblings still breach} --- Odoo record rules enforce only
+USING, with \textbf{no \code{WITH CHECK} analogue}, so moving an owned line onto a foreign order survives the
+native rule --- all closed by the PEP's WITH-CHECK. \textbf{Method (honest):} each mutation runs inside a
+\code{SAVEPOINT} rolled back with \code{env.clear()} (discarding the ORM cache \emph{and} the pending-write queue,
+so a rolled-back write cannot re-flush into a later driver's aggregates); the driver asserts the DB --- rows,
+values and FKs --- is bit-for-bit back to seed; ``breach'' is measured from DB state via sudo \code{search\_count}
+(cache-independent), never the guard's verdict; the committed CSV records \textbf{verdicts only}; and the
+operational-write ACL grant is \textbf{read-safe} (every \S4 read table stays byte-identical, proven by byte-diff).
+Not a defect claim --- a confused-deputy WRITE from a header-incomplete config, the same class as the read gap,
+now enforced on writes.
 
 % =====================================================================
 \section{PCC-ERP: a policy-closure compiler}
@@ -575,8 +605,13 @@ framing: \emph{``Policy-Closure Compilation for Row-Level Authorization in ERP L
         misconfiguration operating as documented), \textbf{not} a leak rate, and \textbf{not} an
         Odoo$\leftrightarrow$Postgres semantic equivalence. Validity rests on running as a
         \code{NOSUPERUSER NOBYPASSRLS} role; the committed positive-control row is the proof.
-  \item \textbf{Read-scoped:} write/create/unlink, prompt-injection elimination, and infrastructure threats are
-        out of scope; prompt injection is ``reduced + measured'', not ``eliminated''.
+  \item \textbf{Write plane is single-op, not workflow (\S4.7 / RQ10):} the mutation suite covers
+        create/write/unlink confused-deputy writes on the child relations (closed by USING + WITH-CHECK);
+        bulk/mass writes, workflow/state-machine transitions, field-level write-masking, and a write-side
+        existence channel are named future work; non-vacuity rests on a realistic operational-write ACL grant
+        (read-safe by byte-diff).
+  \item \textbf{Read/write-scoped:} prompt-injection elimination and infrastructure threats are out of scope;
+        prompt injection is ``reduced + measured'', not ``eliminated''.
 \end{itemize}
 
 % =====================================================================
@@ -693,7 +728,10 @@ grammar} (residual-leak 0/41); the bespoke POLICY is shown to be an instance of 
 (RQ7, 20/20); the PEP extends to a \textbf{Doc-RAG retrieval plane} that delivers chunks only re-rendered
 from row-authorized, clearance-masked sources (RQ8, guarded leak 0); and the relational-traversal gap is shown
 to be \textbf{paradigm-level} --- the same leak and the same pushdown fix reproduce on \textbf{PostgreSQL RLS}
-(RQ9, 12/6 $\to$ 6/0). The work is applied-security + benchmark +
-reference implementation for an under-served setting, with an explicitly honest soundness frontier.
+(RQ9, 12/6 $\to$ 6/0); and the threat model extends to \textbf{mutations}, where a forced write-check
+(USING + WITH-CHECK) closes the confused-deputy \emph{write} gap on create/write/unlink (RQ10, 12/12 breaching
+writes held --- including a reassignment the naive native rule misses for want of a \code{WITH CHECK}). The work
+is applied-security + benchmark + reference implementation for an under-served setting, with an explicitly honest
+soundness frontier.
 
 \end{document}

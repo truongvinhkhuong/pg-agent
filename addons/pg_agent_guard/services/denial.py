@@ -31,10 +31,16 @@ DENIAL_CONFIG = {
 }
 
 # Canonical "no data" value per operation. deny == genuine-empty by construction.
+# For mutations (create/write/unlink) the uniform "nothing happened" value is False —
+# the harness measures a write breach by DB state, not this return value, but a denied
+# mutation must look identical to a no-op write and must NOT name the target row.
 _EMPTY = {
     "search_read": list,
     "read_group": list,
     "search_count": lambda: 0,
+    "create": lambda: False,
+    "write": lambda: False,
+    "unlink": lambda: False,
 }
 
 

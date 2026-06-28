@@ -29,7 +29,9 @@ the residual-risk surface with a deterministic, LLM-free **red-team grammar** th
 whose compiler reproduces the guard's exact authorization domain (RQ7); (vi) extend the PEP to a **Doc-RAG
 retrieval plane** that delivers chunks only re-rendered from row-authorized, clearance-masked sources (RQ8); and
 (vii) show the gap is **paradigm-level, not an Odoo artifact** by reproducing the same relational-traversal leak
-and the same predicate-pushdown fix on a second engine, **PostgreSQL RLS** (RQ9).
+and the same predicate-pushdown fix on a second engine, **PostgreSQL RLS** (RQ9); and (viii) extend the threat
+model to **mutations** — a forced write-check (USING + WITH-CHECK) closes the confused-deputy *write* gap on
+create/write/unlink (RQ10), 12/12 breaching writes held.
 
 The contribution is scoped honestly to **applied security + benchmark + reference implementation** for an
 under-served setting (ERP record-rule governance that is incomplete on child models), not to a novel
@@ -65,8 +67,10 @@ compiler. We make this cross-engine claim concrete by reproducing the same gap a
 Attacker = an employee probing beyond scope / prompt-injection / chaining, with a real role, natural-language
 prompts only, no code or policy edits, observing refusal responses + latency. Defender = a deterministic PEP
 at the data-result plane, with the **LLM kept outside the security boundary** (it does not decide
-authorization — OrgAccess shows GPT-4.1 reaches only F1≈0.27 on RBAC reasoning). Out of scope: infrastructure
-RCE, write/create/unlink, model extraction.
+authorization — OrgAccess shows GPT-4.1 reaches only F1≈0.27 on RBAC reasoning). The primary suite is
+**read-scoped**; §4.7 (RQ10) deliberately **extends the threat model to mutations** — an agent that issues
+`create`/`write`/`unlink` tool-calls — and shows the same relational-traversal gap and the same pushdown fix on
+the write side. Out of scope: infrastructure RCE, bulk/workflow-state mutations, model extraction.
 
 ---
 
@@ -107,6 +111,10 @@ A model-agnostic PEP ([`pg_agent_guard`](../addons/pg_agent_guard)) the agent mu
 4. **Uniform denial** — identical empty result + constant-time/jitter, defeating existence-inference via the
    denial channel.
 5. **Independent audit** — per-call decision log (stdlib, isolated from any AGPL audit module).
+6. **Write-check (RQ10, §4.7)** — `guarded_create`/`guarded_write`/`guarded_unlink` add the mutation analogue
+   of (1): **USING** (a write/unlink target row must be inside the forced row-domain) + **WITH-CHECK** (any
+   governed FK being SET — e.g. a child's `order_id` — must resolve to an in-domain parent, read via sudo so the
+   true parent team is checked, not the persona's view). Same fail-closed + uniform-deny + audit contract.
 
 ---
 
@@ -179,8 +187,42 @@ pivots stay `held`. **PG-Agent is safe/held in both variants** — point fixes d
 CI (`.github/workflows/ci.yml`) installs the addons in **Odoo 19 + Postgres** and runs `ci_gate(env)` over
 **both variants**; it fails unless Unauthorized = Data-Leakage = Existence-Inference = False-Block = 0, **no
 in-scope adaptive RESIDUAL-LEAK**, **no in-scope variant of the automated red-team grammar survives** (§4.3),
-and the benchmark is meaningful (attacks fire undefended). Any change that reopens a leak — canonical path, a
-hand-picked pivot, **or** any enumerated grammar point — turns CI red.
+**no in-scope write/mutation survives the write-check** (§4.7), and the benchmark is meaningful (attacks fire
+undefended). Any change that reopens a leak — canonical path, a hand-picked pivot, an enumerated grammar point,
+**or** a confused-deputy write — turns CI red.
+
+### 4.7 Write-path / mutation enforcement (RQ10) · [`write_attacks.csv`](../results/write_attacks.csv)
+
+The read suite is read-scoped; here we **extend the threat model to mutations** and show the relational-traversal
+gap is not read-only. Native Odoo does **not** re-apply a parent's record rule when a child is mutated *directly*,
+so once an operational user holds coarse create/write/unlink ACL on the child models — the realistic ERP
+misconfiguration (sales staff legitimately manage an order's lines/payments/guarantees, but the record-rule
+scoping is forgotten on the children) — the **confused-deputy WRITE** opens: a team-restricted persona can create
+a payment on **another team's** order, overwrite/delete a foreign child row, or reassign an owned child onto a
+foreign order. The PEP closes it with `guarded_create`/`guarded_write`/`guarded_unlink` (§3.6): **USING** (the
+target row must be in the forced row-domain) + **WITH-CHECK** (any governed FK being set must resolve to an
+in-domain parent). 4 families × 3 child models = **12 confused-deputy writes**:
+
+| variant | undefended | PG-Agent | outcome |
+|---|---|---|---|
+| V-vuln (children unruled) | **12/12 breach** | **0/12 breach** | all `held` |
+| V-rule (naive line rule) | line create/overwrite/unlink blocked; **reassign-line + payment/guarantee still breach** | **0 breach** | line USING-ops `non-firing`, rest `held` |
+
+Every confused-deputy write breaches undefended and **the write-check denies every one (0 residual-leak)**, uniform
+(no row named → no write-side existence oracle) and audited. The V-rule row is a sharper non-composability result
+than the read plane: the naive per-model line rule not only **forgets the payment/guarantee siblings** but, even on
+the line it covers, enforces only **USING and not WITH-CHECK** — so *reassigning* an owned line onto a foreign order
+still breaches natively (Odoo record rules have no `WITH CHECK` analogue); the PEP's WITH-CHECK is what closes it.
+
+**Method (honest).** Mutations corrupt the seeded DB, so every attack runs inside a `SAVEPOINT` that is rolled
+back, with `env.clear()` discarding the ORM cache **and** the pending-write queue (a bare cache-invalidate would
+let the rolled-back write re-flush into a later driver's aggregates); the driver asserts the DB — rows, values
+**and** FKs — is bit-for-bit back to seed. "Breach" is measured from DB state via sudo `search_count` (pure SQL,
+cache-independent), the write-side analogue of the read oracle — never the guard's verdict. The committed
+[`write_attacks.csv`](../results/write_attacks.csv) records **verdicts only** (byte-stable); the operational-write
+ACL grant is **read-safe** — every read table in §4 stays byte-identical, which `make reproduce-all` proves by
+byte-diff. *Not a defect claim:* a confused-deputy WRITE from a header-incomplete config, the same class as the
+read gap, closed by the same predicate pushdown — now enforced on writes.
 
 ---
 
@@ -530,8 +572,12 @@ Agents."*
   Postgres RLS is broken (the ungoverned child is a realistic DBA misconfiguration operating as documented),
   **not** a leak rate, and **not** an Odoo↔Postgres semantic equivalence (analogy at the gap/fix level only).
   Validity rests on running as a `NOSUPERUSER NOBYPASSRLS` role; the committed positive-control row is the proof.
-- **Read-scoped:** write/create/unlink, prompt-injection elimination, and infrastructure threats are out of
-  scope; prompt injection is "reduced + measured", not "eliminated".
+- **Write plane is single-op, not workflow (§4.7 / RQ10):** the mutation suite covers create/write/unlink
+  confused-deputy writes on the child relations (closed by the USING + WITH-CHECK write-check); bulk/mass writes,
+  workflow/state-machine transitions, field-level write-masking, and a write-side existence-inference channel are
+  named future work. The non-vacuity rests on a realistic operational-write ACL grant (read-safe by byte-diff).
+- **Read/write-scoped:** prompt-injection elimination and infrastructure threats are out of scope; prompt
+  injection is "reduced + measured", not "eliminated".
 
 ---
 
@@ -641,6 +687,8 @@ the bespoke POLICY is shown to be an instance of a general **ABAC×ReBAC** subje
 compiler reproduces the guard's exact domain (RQ7, 20/20); the PEP extends to a **Doc-RAG retrieval plane**
 that delivers chunks only re-rendered from row-authorized, clearance-masked sources (RQ8, guarded leak 0); and
 the relational-traversal gap is shown to be **paradigm-level** — the same leak and the same pushdown fix
-reproduce on **PostgreSQL RLS** (RQ9, 12/6 → 6/0). The
+reproduce on **PostgreSQL RLS** (RQ9, 12/6 → 6/0); and the threat model extends to **mutations**, where a forced
+write-check (USING + WITH-CHECK) closes the confused-deputy *write* gap on create/write/unlink (RQ10, 12/12
+breaching writes held — including a reassignment the naive native rule misses for want of a `WITH CHECK`). The
 work is applied-security + benchmark + reference implementation for an under-served setting, with an explicitly
 honest soundness frontier.

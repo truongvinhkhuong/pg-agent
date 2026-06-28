@@ -76,6 +76,18 @@ _TEAM_GROUPS = (
 # Outcome of a guard check. `domain` is the effective domain when allowed.
 _GuardDecision = namedtuple("_GuardDecision", ["allowed", "domain", "reason"])
 
+# Sentinel: a write-check leaf whose governed field is neither being set nor pre-existing.
+_UNRESOLVED = object()
+
+
+def _leaf_ok(op, actual, expected):
+    """Does a resolved write-check value satisfy one authz leaf operator?"""
+    if op == "in":
+        return bool(set(actual) & set(expected)) if isinstance(actual, list) else actual in expected
+    if op == "=":
+        return actual == expected
+    return False  # unsupported operator in a write-check -> fail-closed
+
 
 class PgAgentGuard(models.AbstractModel):
     _name = "pg.agent.guard"
@@ -284,6 +296,126 @@ class PgAgentGuard(models.AbstractModel):
             )
         denial.pad_latency(t0)
         return rows
+
+    # ── Guarded WRITE surface (RQ10 — mutation plane) ─────────────────────────
+    # The agent's create/write/unlink tool-calls MUST route through these. The read
+    # wrappers force a USING domain on what the persona may SEE; these add the missing
+    # write-check: USING (a write/unlink target row must be inside `_authz_domain`) plus
+    # WITH-CHECK (any governed FK/field being SET must resolve to a parent/value inside
+    # the domain). Same fail-closed + uniform-deny + audit contract as the read surface.
+    # Closes the confused-deputy WRITE gap: native Odoo does NOT re-apply a parent record
+    # rule when a child is mutated directly, so a child with no rule of its own is writable
+    # across teams. We never trust the FK target's apparent team — `_vals_in_authz` reads
+    # the parent's TRUE governing fields via sudo.
+    def _authz_roots(self, authz):
+        """Root field names of the authz-leaf paths (e.g. order_id.team_code -> order_id)."""
+        return {path.split(".")[0] for (path, _op, _v) in authz}
+
+    @staticmethod
+    def _id_of(value):
+        """Normalize a relational value (recordset / id / id-list) to an id or id-list."""
+        if hasattr(value, "ids"):
+            return value.ids
+        return value.id if hasattr(value, "id") else value
+
+    def _resolve_leaf(self, model, path, vals, base):
+        """Actual record-side value of authz-leaf `path` for a record carrying `vals`
+        (falling back to the existing `base` record for governed fields not in `vals`).
+        A one-hop FK path reads the parent's TRUE field via sudo. _UNRESOLVED if a
+        governed field is neither set nor pre-existing."""
+        root = path.split(".")[0]
+        if root in vals:
+            raw = vals[root]
+        elif base is not None:
+            raw = base[root]
+        else:
+            return _UNRESOLVED
+        if "." not in path:
+            return self._id_of(raw)
+        rid = raw.id if hasattr(raw, "id") else raw
+        if not rid:
+            return _UNRESOLVED
+        comodel = self.env[model]._fields[root].comodel_name
+        parent = self.env[comodel].sudo().browse(int(rid))
+        return self._id_of(parent[path.split(".", 1)[1]])
+
+    def _vals_in_authz(self, model, vals, base=None):
+        """WITH-CHECK: would a record carrying `vals` satisfy every authz leaf?
+        Fail-closed on any unresolved leaf or unsupported operator."""
+        authz = self._authz_domain(model)
+        if authz is None or authz == [("id", "=", 0)]:
+            return False
+        for path, op, expected in authz:
+            actual = self._resolve_leaf(model, path, vals, base)
+            if actual is _UNRESOLVED or not _leaf_ok(op, actual, expected):
+                return False
+        return True
+
+    def guarded_create(self, model, vals):
+        """Create only if the new record falls inside the persona's authorization domain.
+
+        WITH-CHECK on every governed FK/field in `vals` (e.g. a child's `order_id` must
+        point at an in-team parent). Returns the new id, or the uniform deny value.
+        """
+        t0 = time.monotonic()
+        if self._authz_domain(model) is None or not self._vals_in_authz(model, vals):
+            audit_decision(
+                self.env, model, "create", [], allowed=False,
+                reason="write-check: create target outside authorization domain",
+                denial_uniformized=bool(denial.DENIAL_CONFIG.get("enabled")),
+            )
+            return self._deny("create", t0)
+        rec = self.env[model].create(vals)
+        audit_decision(self.env, model, "create", [("id", "=", rec.id)], allowed=True,
+                       reason="write-check: create within domain")
+        denial.pad_latency(t0)
+        return rec.id
+
+    def guarded_write(self, model, ids, vals):
+        """Write only if every target row is in-domain (USING) and the result stays
+        in-domain (WITH-CHECK on any governed FK/field being reassigned)."""
+        t0 = time.monotonic()
+        ids = list(ids) if isinstance(ids, (list, tuple)) else [ids]
+        authz = self._authz_domain(model)
+        if authz is None:
+            return self._write_deny(model, "write", t0)
+        in_scope = self.env[model].sudo().search([("id", "in", ids)] + authz)
+        if set(in_scope.ids) != set(ids):          # USING: a foreign target row
+            return self._write_deny(model, "write", t0)
+        if any(r in vals for r in self._authz_roots(authz)):   # WITH-CHECK: reassignment
+            for rec in self.env[model].sudo().browse(ids):
+                if not self._vals_in_authz(model, vals, base=rec):
+                    return self._write_deny(model, "write", t0)
+        self.env[model].browse(ids).write(vals)
+        audit_decision(self.env, model, "write", [("id", "in", ids)], allowed=True,
+                       reason="write-check: write within domain")
+        denial.pad_latency(t0)
+        return True
+
+    def guarded_unlink(self, model, ids):
+        """Unlink only if every target row is inside the persona's authorization domain."""
+        t0 = time.monotonic()
+        ids = list(ids) if isinstance(ids, (list, tuple)) else [ids]
+        authz = self._authz_domain(model)
+        if authz is None:
+            return self._write_deny(model, "unlink", t0)
+        in_scope = self.env[model].sudo().search([("id", "in", ids)] + authz)
+        if set(in_scope.ids) != set(ids):          # USING: a foreign target row
+            return self._write_deny(model, "unlink", t0)
+        self.env[model].browse(ids).unlink()
+        audit_decision(self.env, model, "unlink", [("id", "in", ids)], allowed=True,
+                       reason="write-check: unlink within domain")
+        denial.pad_latency(t0)
+        return True
+
+    def _write_deny(self, model, operation, t0):
+        """Audit + uniform deny for a write/unlink (no row named -> no existence leak)."""
+        audit_decision(
+            self.env, model, operation, [], allowed=False,
+            reason="write-check: target outside authorization domain",
+            denial_uniformized=bool(denial.DENIAL_CONFIG.get("enabled")),
+        )
+        return self._deny(operation, t0)
 
     # ── Output validation (T2.3) ─────────────────────────────────────────────
     def guarded_validate_answer(self, answer_text, forbidden_values, *, redact=True):

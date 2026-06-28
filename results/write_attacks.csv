@@ -1,0 +1,13 @@
+family,vector,attack_id,model,op,in_scope,undefended,pg_agent,outcome
+write-create-foreign-parent,create a line on another team's order,wa-create-line,line,create,True,breach,denied,held
+write-create-foreign-parent,create a payment on another team's order,wa-create-payment,payment,create,True,breach,denied,held
+write-create-foreign-parent,create a guarantee on another team's order,wa-create-guarantee,guarantee,create,True,breach,denied,held
+write-foreign-child,overwrite a foreign team's line row,wa-update-line,line,write,True,breach,denied,held
+write-foreign-child,overwrite a foreign team's payment row,wa-update-payment,payment,write,True,breach,denied,held
+write-foreign-child,overwrite a foreign team's guarantee row,wa-update-guarantee,guarantee,write,True,breach,denied,held
+unlink-foreign-child,delete a foreign team's line row,wa-unlink-line,line,unlink,True,breach,denied,held
+unlink-foreign-child,delete a foreign team's payment row,wa-unlink-payment,payment,unlink,True,breach,denied,held
+unlink-foreign-child,delete a foreign team's guarantee row,wa-unlink-guarantee,guarantee,unlink,True,breach,denied,held
+cross-team-reassignment,reassign an owned line to a foreign order (WITH-CHECK),wa-reassign-line,line,write,True,breach,denied,held
+cross-team-reassignment,reassign an owned payment to a foreign order (WITH-CHECK),wa-reassign-payment,payment,write,True,breach,denied,held
+cross-team-reassignment,reassign an owned guarantee to a foreign order (WITH-CHECK),wa-reassign-guarantee,guarantee,write,True,breach,denied,held

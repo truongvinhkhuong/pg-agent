@@ -70,9 +70,9 @@
             <field name="groups" eval="[(4, ref('group_team_ttv'))]"/>
             <field name="domain_force">[('order_id.team_code', '=', 'ttv')]</field>
             <field name="perm_read" eval="True"/>
-            <field name="perm_write" eval="False"/>
-            <field name="perm_create" eval="False"/>
-            <field name="perm_unlink" eval="False"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="True"/>
         </record>
         <record id="rule_line_team_ttf" model="ir.rule">
             <field name="name">Dòng đơn bán: TTF chỉ thấy TTF (naive fix)</field>
@@ -80,9 +80,9 @@
             <field name="groups" eval="[(4, ref('group_team_ttf'))]"/>
             <field name="domain_force">[('order_id.team_code', '=', 'ttf')]</field>
             <field name="perm_read" eval="True"/>
-            <field name="perm_write" eval="False"/>
-            <field name="perm_create" eval="False"/>
-            <field name="perm_unlink" eval="False"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="True"/>
         </record>
         <record id="rule_line_team_ttr" model="ir.rule">
             <field name="name">Dòng đơn bán: TTR chỉ thấy TTR (naive fix)</field>
@@ -90,9 +90,9 @@
             <field name="groups" eval="[(4, ref('group_team_ttr'))]"/>
             <field name="domain_force">[('order_id.team_code', '=', 'ttr')]</field>
             <field name="perm_read" eval="True"/>
-            <field name="perm_write" eval="False"/>
-            <field name="perm_create" eval="False"/>
-            <field name="perm_unlink" eval="False"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="True"/>
         </record>
         <record id="rule_line_team_view_all" model="ir.rule">
             <field name="name">Dòng đơn bán: Xem tất cả</field>

@@ -60,6 +60,7 @@ pg-agent/
 │   ├── policy_model.py             # RQ7: pure ABAC×ReBAC formalization of POLICY (round-trips to _authz_domain)
 │   ├── docrag.py                   # RQ8 L5: pure Doc-RAG corpus + deterministic lexical retriever (no LLM)
 │   ├── agent_loop.py               # End-to-end agent-loop proxy: ScriptedAgent + LLMAgent seam (no LLM in CI)
+│   ├── write_model.py              # RQ10: pure write/mutation attack suite + expected verdicts (no Odoo)
 │   ├── integrity.py                # T4.3 integrity test set + wrong-formula set (symbolic gold) — RQ6
 │   ├── metrics.py                  # TB.3 governed-metrics registry (no Odoo)
 │   ├── consistency.py              # TB.2 pure execution-voting core (no Odoo)
@@ -75,6 +76,7 @@ pg-agent/
 │   ├── test_policy_emit.py         # offline pytest — emit core (no Odoo)
 │   ├── test_numeric_verifier.py    # offline pytest — numeric verifier (no Odoo)
 │   ├── test_rls_model.py           # RQ9: offline calibration + SQL safety-lint for the Postgres-RLS plane
+│   ├── test_write_model.py         # RQ10: offline calibration + invariants for the write/mutation plane
 │   └── test_metrics_and_consistency.py  # offline pytest — metrics + voting + TB.1 blind-spot (no Odoo)
 ├── tools/                          # opt-in / Artifact-Evaluation harness (see REPRODUCE.md, `make`)
 │   ├── reproduce.sh                # one-command isolated reproduce + byte-diff (postgres:16 + odoo:19)
@@ -110,6 +112,19 @@ pg-agent/
 **Extensions (beyond v3.1, grounded, tagged `tier=extension`):** `tenant-bypass` (company axis,
 same N1 mechanism), `attribute-confusion` (decoy `sale_team_group` vs `team_code`).
 **Experimental (ungrounded, separate file):** `ownership-bypass`.
+
+**Write/mutation plane (RQ10, §4.7 — the read gap on the WRITE side):**
+
+| Class | Axis | What it shows |
+|---|---|---|
+| `write-create-foreign-parent` | write | create a child (`payment`/`guarantee`/`line`) on **another team's** order |
+| `write-foreign-child` | write | overwrite a foreign team's child row directly |
+| `unlink-foreign-child` | write | delete a foreign team's child row |
+| `cross-team-reassignment` | write | reassign an owned child onto a foreign order — the **WITH-CHECK** case |
+
+The PEP's `guarded_create`/`guarded_write`/`guarded_unlink` (USING + WITH-CHECK) hold all 12 (0 residual-leak);
+under V-rule the naive line rule plugs line create/overwrite/unlink but **reassign-line + the payment/guarantee
+siblings still breach** (Odoo record rules are USING-only) — all closed by the write-check. See [`results/write_attacks.csv`](results/write_attacks.csv).
 
 Two schema variants (toggle the data file in `pco_core_mock/__manifest__.py`):
 - **V-vuln** (`team_security.xml`) — faithful to production; header-only team rule.

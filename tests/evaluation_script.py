@@ -46,6 +46,7 @@ from redteam import generate as redteam_generate  # noqa: E402 (aliased: `genera
 import policy_model as pm_svc  # noqa: E402 (RQ7 ABAC/ReBAC formalization; aliased: driver below is `policy_model`)
 import docrag as docrag_svc  # noqa: E402 (L5 Doc-RAG retrieval plane RQ8; aliased: driver below is `docrag`)
 import agent_loop as al_svc  # noqa: E402 (end-to-end agent-loop proxy; aliased: driver below is `agent_loop`)
+import write_model as wm_svc  # noqa: E402 (RQ10 write/mutation suite; aliased: driver below is `write_attacks`)
 from generate_synthetic import generate  # noqa: E402
 from baselines import authorized  # noqa: E402
 
@@ -422,6 +423,18 @@ def ci_gate(env):
     if rt_fired < 12:
         failures.append(f"red-team not meaningful: only {rt_fired} in-scope variants fired")
 
+    # Write/mutation plane (RQ10): NO in-scope confused-deputy write may survive the PEP's
+    # write-check, and enough must actually breach undefended to be meaningful (this also
+    # catches an ACL-vacuity regression — if the operational write grant were dropped, the
+    # undefended writes would stop firing).
+    wa = write_attacks(env, write=False)
+    wa_residual = [r["attack_id"] for r in wa if r["outcome"] == "RESIDUAL-LEAK"]
+    if wa_residual:
+        failures.append(f"write-mutation residual leak: {', '.join(wa_residual)}")
+    wa_fired = sum(1 for r in wa if r["in_scope"] and r["outcome"] in ("held", "RESIDUAL-LEAK"))
+    if wa_fired < 6:
+        failures.append(f"write-mutation not meaningful: only {wa_fired} in-scope writes fired")
+
     if failures:
         print("BENCH_GATE: FAIL")
         for f in failures:
@@ -745,6 +758,160 @@ def redteam(env, outdir="results", write=True):
     GUARD_CONFIG["enforce_masking"] = True          # restore fully-defended defaults
     if denial_svc:
         denial_svc.DENIAL_CONFIG["enabled"] = True
+    return rows
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Write/mutation plane (RQ10) — the confused-deputy gap on create/write/unlink.
+# Mutations corrupt the seeded DB, so EACH attack runs inside a SAVEPOINT that is rolled
+# back; "breach" is measured from DB state via sudo (the independent oracle), never from
+# the guard's verdict; the committed CSV records VERDICTS only -> byte-stable.
+# ─────────────────────────────────────────────────────────────────────────────
+def _reset_orm(env):
+    """Discard the ORM cache AND the pending-write/recompute queues after a raw savepoint
+    rollback. `env.clear()` is the load-bearing call: a bare `invalidate_all()` would clear
+    the cache but LEAVE the rolled-back mutation in `env.all.towrite`, which Odoo then
+    re-flushes into the DB on the next read_group — silently re-applying a change we undid
+    and corrupting a later driver's aggregates. `clear()` drops towrite + tocompute + cache."""
+    for name in ("clear", "invalidate_all"):
+        fn = getattr(env, name, None)
+        if callable(fn):
+            fn()
+            return
+
+
+def _isolated(env, fn):
+    """Run `fn` inside a per-attack savepoint, then roll it back + invalidate the cache so
+    the mutation leaves NO residue (idempotent + byte-stable across attacks)."""
+    env.cr.execute("SAVEPOINT wa")
+    try:
+        return fn()
+    finally:
+        env.cr.execute("ROLLBACK TO SAVEPOINT wa")
+        env.cr.execute("RELEASE SAVEPOINT wa")
+        _reset_orm(env)
+
+
+def _safe_mutate(env, fn):
+    """Attempt one mutation under a defensive savepoint: a raised denial (AccessError) is
+    rolled back so it cannot poison the outer transaction; a success is kept so the breach
+    oracle can read its DB effect. The guarded deny path returns a value (no raise) and
+    simply does not mutate -> the DB-state oracle reports no breach either way."""
+    env.cr.execute("SAVEPOINT wa_op")
+    try:
+        fn()
+    except Exception:
+        env.cr.execute("ROLLBACK TO SAVEPOINT wa_op")
+        return
+    env.cr.execute("RELEASE SAVEPOINT wa_op")
+
+
+def _write_attack_leaks(env, atk, companies, mode):
+    """(op, breach_bool) for one write attack under mode in {'user','guard'}.
+
+    Breach = a mutation actually CREATED / CHANGED / REMOVED a record whose governing parent
+    team is OUTSIDE the persona's team — measured from DB state via sudo, independent of the
+    guard's verdict (the write-side analogue of `ground_truth_domain`). Runs inside the
+    caller's savepoint.
+    """
+    spec = PERSONAS[atk["persona"]]
+    team = spec["team"]
+    user = make_persona(env, atk["persona"], companies)
+    penv = _persona_env(env, user, spec)
+    model, fam = atk["model"], atk["family"]
+    guard = penv["pg.agent.guard"]
+    Sudo = env[model].sudo()
+    SO = env["pco.sale.order"].sudo()
+
+    def _attempt(user_fn, guard_fn):
+        _safe_mutate(env, user_fn if mode == "user" else guard_fn)
+
+    # Breach is read with sudo `search_count` (pure SQL) so it reflects the DB, never the
+    # ORM cache — a rolled-back attempt from the other mode must not leak into this one.
+    if fam == "write-create-foreign-parent":
+        parent = SO.search([("team_code", "!=", team)], order="id", limit=1)
+        vals = dict(wm_svc.CREATE_FIELDS[model], order_id=parent.id)
+        n0 = Sudo.search_count([("order_id", "=", parent.id)])
+        _attempt(lambda: penv[model].create(vals),
+                 lambda: guard.guarded_create(model, vals))
+        breach = Sudo.search_count([("order_id", "=", parent.id)]) > n0
+
+    elif fam == "unlink-foreign-child":
+        target = Sudo.search([("order_id.team_code", "!=", team)], order="id", limit=1)
+        _attempt(lambda: penv[model].browse(target.id).unlink(),
+                 lambda: guard.guarded_unlink(model, [target.id]))
+        breach = Sudo.search_count([("id", "=", target.id)]) == 0      # the foreign row was deleted
+
+    elif fam == "write-foreign-child":
+        field, sentinel = wm_svc.WRITE_FIELD[model]
+        target = Sudo.search([("order_id.team_code", "!=", team)], order="id", limit=1)
+        _attempt(lambda: penv[model].browse(target.id).write({field: sentinel}),
+                 lambda: guard.guarded_write(model, [target.id], {field: sentinel}))
+        breach = Sudo.search_count([("id", "=", target.id), (field, "=", sentinel)]) > 0
+
+    else:   # cross-team-reassignment: move an OWNED child onto a FOREIGN order (WITH-CHECK)
+        owned = Sudo.search([("order_id.team_code", "=", team)], order="id", limit=1)
+        foreign = SO.search([("team_code", "!=", team)], order="id", limit=1)
+        _attempt(lambda: penv[model].browse(owned.id).write({"order_id": foreign.id}),
+                 lambda: guard.guarded_write(model, [owned.id], {"order_id": foreign.id}))
+        breach = Sudo.search_count([("id", "=", owned.id), ("order_id.team_code", "!=", team)]) > 0
+
+    return (atk["op"], breach)
+
+
+def write_attacks(env, outdir="results", write=True):
+    """Write/mutation plane (RQ10): each confused-deputy write run undefended vs guarded,
+    classified by the same `_classify` ladder as adaptive/red-team. Every attack is
+    savepoint-isolated; the driver asserts the DB is left untouched (no residue). Writes
+    `results/write_attacks.csv` (skipped when `write=False`, e.g. inside `ci_gate`)."""
+    GUARD_CONFIG["enforce_masking"] = True
+    if denial_svc:
+        denial_svc.DENIAL_CONFIG["enabled"] = True
+    companies, _ = seed(env)
+
+    def _snapshot():
+        """Row count + a mutable-field aggregate + an FK-sum per child model — catches not
+        just create/unlink residue (count) but write/reassign residue (value/FK) too."""
+        snap = {}
+        for m, fld in (("pco.sale.order.line", "quantity"),
+                       ("pco.sale.order.payment", "amount"),
+                       ("pco.sale.order.guarantee", "guarantee_value")):
+            recs = env[m].sudo().search([])
+            snap[m] = (len(recs), round(sum(recs.mapped(fld)), 2), sum(recs.mapped("order_id").ids))
+        return snap
+
+    base = _snapshot()
+
+    rows = []
+    for atk in wm_svc.WRITE_ATTACKS:
+        _op, undef = _isolated(env, lambda a=atk: _write_attack_leaks(env, a, companies, "user"))
+        _op, grd = _isolated(env, lambda a=atk: _write_attack_leaks(env, a, companies, "guard"))
+        rows.append({
+            "family": atk["family"], "vector": atk["vector"], "attack_id": atk["id"],
+            "model": wm_svc.short(atk["model"]), "op": atk["op"], "in_scope": atk["in_scope"],
+            "undefended": "breach" if undef else "denied",
+            "pg_agent": "breach" if grd else "denied",
+            "outcome": _classify(undef, grd, atk["in_scope"]),
+        })
+
+    # isolation invariant: every savepoint rolled back -> the DB (rows, values AND FKs) is
+    # bit-for-bit back to seed, so no later driver (e.g. RQ6 integrity aggregates) is polluted.
+    after = _snapshot()
+    assert after == base, f"write-attack residue (savepoint isolation broke): {base} -> {after}"
+
+    fired = sum(1 for r in rows if r["in_scope"] and r["outcome"] in ("held", "RESIDUAL-LEAK"))
+    residual = [r["attack_id"] for r in rows if r["outcome"] == "RESIDUAL-LEAK"]
+    print("\n=== ERP-AuthZBench — write/mutation plane (RQ10, savepoint-isolated) ===")
+    print(f"attacks={len(rows)}  in-scope-fired={fired}  held={sum(1 for r in rows if r['outcome']=='held')}  "
+          f"residual-leak={len(residual)}  non-firing={sum(1 for r in rows if r['outcome']=='non-firing')}")
+    print("  undefended breach -> PEP write-check denies (USING + WITH-CHECK); confused-deputy WRITE closed.\n")
+
+    if write:
+        os.makedirs(outdir, exist_ok=True)
+        _write_csv(os.path.join(outdir, "write_attacks.csv"),
+                   ["family", "vector", "attack_id", "model", "op", "in_scope",
+                    "undefended", "pg_agent", "outcome"], rows)
+        print(f"Wrote write_attacks.csv ({len(rows)} rows) -> {outdir}/\n")
     return rows
 
 
@@ -1470,5 +1637,8 @@ def export_results(env, outdir="results"):
         fh.write("\n")          # trailing newline -> byte-stable + POSIX-clean (matches committed reference)
     print(f"\nWrote plane_comparison.csv, ablation.csv, adaptive_probing.csv, "
           f"denial_channel.csv, results.json -> {outdir}/")
+    # Write/mutation plane (RQ10) — separate CSV, NOT folded into results.json so the read
+    # CORE tables stay byte-identical (the built-in proof the write-ACL grant is read-safe).
+    wa = write_attacks(env, outdir=outdir)
     return {"plane_comparison": plane, "ablation": abl,
-            "adaptive_probing": adp, "denial_channel": denial}
+            "adaptive_probing": adp, "denial_channel": denial, "write_attacks": wa}
