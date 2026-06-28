@@ -72,6 +72,27 @@ authorization — OrgAccess shows GPT-4.1 reaches only F1≈0.27 on RBAC reasoni
 `create`/`write`/`unlink` tool-calls — and shows the same relational-traversal gap and the same pushdown fix on
 the write side. Out of scope: infrastructure RCE, bulk/workflow-state mutations, model extraction.
 
+### 1.4 Research questions (RQ1–RQ10)
+
+The benchmark + PEP answer ten questions; the table maps each to the section that reports it. RQ1–RQ5 are the
+canonical read-plane PEP questions (contributions (i)–(ii)); RQ6–RQ10 are the extensions (contributions (iv)–(viii)).
+
+| RQ | Question | § |
+|---|---|---|
+| RQ1 | Does a forced row-domain close the relational-traversal leak the inherited-RBAC / action-authz planes miss? | §4.1 |
+| RQ2 | Does sensitivity-aware masking stop confidential field/measure exposure? | §4.2 |
+| RQ3 | Does each defense layer zero a distinct metric (defense-in-depth)? | §4.2 |
+| RQ4 | Is the guard robust to adaptive path-switching + an exhaustive ORM-pivot grammar (residual-leak)? | §4.3 |
+| RQ5 | Does uniform denial close the existence-inference channel? | §4.4 |
+| RQ6 | Can an integrity stack drive silently-wrong + wrong-formula numbers to zero? | §6 |
+| RQ7 | Is the bespoke POLICY an instance of a general ABAC×ReBAC model whose compiler reproduces it? | §5.4 |
+| RQ8 | Does the PEP extend to a Doc-RAG retrieval plane (deliver only row-authorized, masked chunks)? | §7 |
+| RQ9 | Is the gap paradigm-level — does it reproduce on a second engine (PostgreSQL RLS)? | §5.5 |
+| RQ10 | Does a forced write-check (USING + WITH-CHECK) close the confused-deputy *write* gap? | §4.7 |
+
+(PCC-ERP — derive→emit→verify the closures, contribution (iii) — underpins RQ1/RQ7; §4.8 characterizes the PEP's
+overhead as a cost study, not a separate RQ.)
+
 ---
 
 ## 2. ERP-AuthZBench

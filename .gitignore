@@ -50,6 +50,17 @@ venv/
 .pytest_cache/
 .mypy_cache/
 
+# ── LaTeX build artifacts (paper.tex is the source; `make paper` builds the PDF) ─────
+docs/*.pdf
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.fls
+docs/*.fdb_latexmk
+docs/*.toc
+docs/*.synctex.gz
+docs/*.xdv
+
 # ── OS / editor ──────────────────────────────────────────────────────────────
 .DS_Store
 .idea/

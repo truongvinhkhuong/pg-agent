@@ -1,7 +1,8 @@
 # Artifact-Evaluation entry points for pg-agent / ERP-AuthZBench. See REPRODUCE.md.
 # Tiers:  test (offline, seconds)  <  reproduce (core, ~min)  <  reproduce-all  <  scale (CE apps, ~min).
-.PHONY: help test reproduce reproduce-all scale rls lint clean
+.PHONY: help test reproduce reproduce-all scale rls paper lint clean
 PY ?= python3
+TEX_IMAGE ?= texlive/texlive:latest      # override with any Docker LaTeX image
 
 # The offline unit tests (no Odoo, no LLM, no network) — mirrors CI static-checks.
 OFFLINE := test_output_validator test_sensitivity_registry test_policy_closure test_policy_scan \
@@ -15,6 +16,7 @@ help:
 	@echo "make reproduce-all # + RQ6/RQ7/RQ8 / agent-loop / LLM-replay drivers"
 	@echo "make scale         # CE corpus endemicity + soundness frontier (installs ~11 CE apps) — ~10-20 min"
 	@echo "make rls           # cross-engine RLS gap+fix on Postgres (db-only, byte-diff) — §5.5/RQ9 — seconds"
+	@echo "make paper         # compile docs/paper.tex -> docs/paper.pdf in an isolated Docker LaTeX image"
 	@echo "make lint          # pre-commit: detect-secrets + raw-data regression gate"
 	@echo "make clean         # tear down the isolated pgagent-ae compose stack"
 
@@ -33,6 +35,13 @@ scale:
 
 rls:
 	@bash tools/rls_probe.sh
+
+# Compile the LaTeX port in an isolated container (no host TeX). XeLaTeX = the fontspec branch
+# (native UTF-8); the PDF + aux are build artifacts (gitignored). Override TEX_IMAGE if desired.
+paper:
+	@docker run --rm -v "$(PWD)/docs":/w -w /w $(TEX_IMAGE) \
+		latexmk -xelatex -interaction=nonstopmode -halt-on-error paper.tex
+	@echo "built docs/paper.pdf (gitignored)"
 
 lint:
 	@pre-commit run --all-files

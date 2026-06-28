@@ -24,6 +24,7 @@
 
 \usepackage[english]{babel}
 \usepackage{underscore}      % literal _ in text/\texttt (identifiers, file names)
+\usepackage{amssymb}         % \square (soundness-theorem QED marker, §5.3.1)
 \usepackage{booktabs}
 \usepackage{array}
 \usepackage{geometry}
@@ -61,7 +62,8 @@ row-level authorization of ERP LLM agents; (ii) \textbf{PG-Agent}, a model-agnos
 Enforcement Point (PEP) that is clean on every benchmark class; and (iii) \textbf{PCC-ERP}, a policy-closure
 compiler that \emph{derives} the per-model row-level closures from the ORM relation graph + existing record
 rules, emits them as enforceable policy, and runtime-verifies gap closure --- validated on the mock
-end-to-end and on vanilla Odoo CE \code{sale}+\code{account}+\code{stock}. On the orthogonal reliability axis
+end-to-end and at corpus scale on vanilla Odoo CE, where the relational-traversal gap proves \textbf{endemic}
+(15 gaps recurring across 6 of 8 business domains). On the orthogonal reliability axis
 (RQ6) we adopt a three-layer \textbf{integrity} stack (numeric verifier + governed metrics + execution-guided
 self-consistency) that drives the silently-wrong-number rate to zero and catches
 correct-arithmetic-with-the-wrong-formula --- framed as applied, not novelty. We additionally (iv)
@@ -112,6 +114,25 @@ authorization --- OrgAccess shows GPT-4.1 reaches only F1$\approx$0.27 on RBAC r
 \textbf{read-scoped}; \S4.7 (RQ10) deliberately \textbf{extends the threat model to mutations} --- an agent that
 issues \code{create}/\code{write}/\code{unlink} tool-calls --- with the same gap and the same pushdown fix on the
 write side. Out of scope: infrastructure RCE, bulk/workflow-state mutations, model extraction.
+
+\subsection{Research questions (RQ1--RQ10)}
+The benchmark + PEP answer ten questions. RQ1--RQ5 are the canonical read-plane PEP questions (contributions
+(i)--(ii)); RQ6--RQ10 are the extensions (contributions (iv)--(viii)).
+
+\begin{itemize}[leftmargin=*,nosep]
+  \item \textbf{RQ1} (\S4.1) forced row-domain closes the relational-traversal leak the inherited-RBAC /
+        action-authz planes miss; \textbf{RQ2} (\S4.2) masking stops confidential field/measure exposure;
+        \textbf{RQ3} (\S4.2) each defense layer zeroes a distinct metric; \textbf{RQ4} (\S4.3) robustness to
+        adaptive path-switching + an exhaustive ORM-pivot grammar; \textbf{RQ5} (\S4.4) uniform denial closes the
+        existence-inference channel.
+  \item \textbf{RQ6} (\S6) integrity stack drives silently-wrong + wrong-formula numbers to zero; \textbf{RQ7}
+        (\S5.4) POLICY is an instance of a general ABAC$\times$ReBAC model whose compiler reproduces it;
+        \textbf{RQ8} (\S7) the PEP extends to a Doc-RAG retrieval plane; \textbf{RQ9} (\S5.5) the gap reproduces
+        on a second engine (PostgreSQL RLS); \textbf{RQ10} (\S4.7) a forced write-check (USING + WITH-CHECK)
+        closes the confused-deputy \emph{write} gap.
+\end{itemize}
+\noindent PCC-ERP (derive$\to$emit$\to$verify, contribution (iii)) underpins RQ1/RQ7; \S4.8 characterizes the
+PEP's overhead as a cost study, not a separate RQ.
 
 % =====================================================================
 \section{ERP-AuthZBench}
@@ -742,8 +763,9 @@ ERP LLM agents leak rows at the data-result plane when record-rule governance is
 a gap the warehouse-native and action-plane lines of work do not close for ERP. ERP-AuthZBench measures it,
 PG-Agent closes it (clean on every class, in both schema variants, robust to adaptive path-switching), and
 PCC-ERP shows the per-model closures are \emph{derivable}: it reconstructs the guard policy on the mock
-end-to-end and surfaces 5 genuine relational-traversal gaps in vanilla Odoo CE, emitting sound native rules
-exactly where the parent rule is pushdownable. On the reliability axis (RQ6), the three-layer integrity stack
+end-to-end and shows the relational-traversal gap is \textbf{endemic} across vanilla Odoo CE --- recurring in
+6 of 8 business domains (15 gaps), low per model but systematic --- emitting sound native rules exactly where
+the parent rule is pushdownable. On the reliability axis (RQ6), the three-layer integrity stack
 drives the silently-wrong-number rate to zero and closes the numeric verifier's wrong-formula blind spot (TB.1
 0/6 $\to$ +TB.3 4/6 $\to$ +TB.2 6/6) via deterministic governed metrics + execution-voting. Beyond the
 canonical results, the residual-risk surface is regression-gated by an exhaustive ORM-pivot \textbf{red-team

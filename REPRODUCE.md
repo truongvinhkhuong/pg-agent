@@ -12,6 +12,9 @@ policy-closure compiler. **Public, synthetic-only, no private code, no API key n
 - Runtimes: `make test` ≈ seconds · `make reproduce` ≈ 3–5 min · `make scale` ≈ 10–20 min.
 - Images: `postgres:16`, `odoo:19` (pulled on first run). For *exact* string reproduction of the scale
   tier, pin a digest (e.g. `odoo:19@sha256:…`); the core tables do not depend on it (see Caveats).
+- **Paper:** `make paper` typesets [`docs/paper.tex`](docs/paper.tex) → `docs/paper.pdf` in an isolated
+  `texlive/texlive` container (XeLaTeX; the PDF + aux are gitignored build artifacts). Verified: 15-page PDF,
+  no errors. The `.tex` numbers are a faithful port of [`docs/technical-report.md`](docs/technical-report.md).
 
 ## 1. Functional badge (no Docker)
 ```
@@ -46,6 +49,7 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 | 4.6 | regression gate | `ci_gate(env)` (both variants) | stdout `BENCH_GATE: PASS` | **core** |
 | 4.7 | write-path confused-deputy + fix (RQ10) | `write_attacks(env)` (in `export_results`) | `results/write_attacks.csv` | **reproduce-all (byte-stable)** |
 | 4.8 | PEP structural overhead (bounded) | `overhead(env)` (in `export_results`) | `results/overhead.csv` | **reproduce-all (byte-stable)** |
+| 5.1 | differential linter (POLICY reproduced on the mock) | `lint(env)` | `results/policy_lint.csv` | reproduce-all |
 | 5.2 | CE scale scan | `scan(env, …)` | `results/scale/coverage.csv` | scale |
 | 5.2.1 | endemicity (11 CE apps) | `scan_corpus(env, …)` | `results/scale/corpus/` | **scale (env-sensitive)** |
 | 5.3 | emit + verify | `emit_classify(env)` | `results/scale/emit.csv` | scale |
