@@ -48,6 +48,19 @@ unification of authorization and integrity (prior art) nor to novel soundness on
 - **Data-result plane:** "do the rows *T* returns match the record-rule the user is entitled to?" This is the
   axis we attack, in the setting where ERP governance is **incomplete**.
 
+**Architecture + threat model** (Figure 1 in [`paper.tex`](paper.tex)): the LLM stays *outside* the security
+boundary — it only emits ORM tool-calls; the PEP forces an authorization domain (reads) and a write-check
+(mutations) before the ORM. Native Odoo governs the order *header* but not its children, so a **direct** child
+query/write is a confused-deputy *relational-traversal* bypass — which the PEP closes.
+
+```mermaid
+flowchart LR
+  A["LLM agent<br/><i>untrusted — outside boundary</i>"] -->|ORM tool-calls| P
+  P["PG-Agent PEP — data-result plane<br/>row-domain · masking · output-validation<br/>uniform-denial · write-check · audit"] -->|forced domain + write-check| D
+  D[("Odoo ORM / Postgres<br/>order header — ir.rule present<br/>line / payment / guarantee — no rule")]
+  A -. "direct child query/write = relational-traversal bypass (closed by the PEP)" .-> D
+```
+
 ### 1.2 Why ERP differs from warehouse-native
 
 Warehouse-native governed-NL-analytics (Snowflake Cortex Analyst, Databricks Genie, MS Fabric Data Agent)

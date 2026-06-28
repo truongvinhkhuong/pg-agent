@@ -37,9 +37,10 @@ rls:
 	@bash tools/rls_probe.sh
 
 # Compile the LaTeX port in an isolated container (no host TeX). XeLaTeX = the fontspec branch
-# (native UTF-8); the PDF + aux are build artifacts (gitignored). Override TEX_IMAGE if desired.
+# (native UTF-8); the PDF + aux are build artifacts (gitignored). The REPO ROOT is mounted (workdir
+# docs/) so any data-driven figure can read `../results/*.csv`. Override TEX_IMAGE if desired.
 paper:
-	@docker run --rm -v "$(PWD)/docs":/w -w /w $(TEX_IMAGE) \
+	@docker run --rm -v "$(PWD)":/repo -w /repo/docs $(TEX_IMAGE) \
 		latexmk -xelatex -interaction=nonstopmode -halt-on-error paper.tex
 	@echo "built docs/paper.pdf (gitignored)"
 
