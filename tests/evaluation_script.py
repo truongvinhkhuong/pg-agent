@@ -47,6 +47,7 @@ import policy_model as pm_svc  # noqa: E402 (RQ7 ABAC/ReBAC formalization; alias
 import docrag as docrag_svc  # noqa: E402 (L5 Doc-RAG retrieval plane RQ8; aliased: driver below is `docrag`)
 import agent_loop as al_svc  # noqa: E402 (end-to-end agent-loop proxy; aliased: driver below is `agent_loop`)
 import write_model as wm_svc  # noqa: E402 (RQ10 write/mutation suite; aliased: driver below is `write_attacks`)
+import overhead as ovh_svc  # noqa: E402 (§4.8 PEP structural overhead; aliased: driver below is `overhead`)
 from generate_synthetic import generate  # noqa: E402
 from baselines import authorized  # noqa: E402
 
@@ -916,6 +917,89 @@ def write_attacks(env, outdir="results", write=True):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Performance / overhead (§4.8) — the STRUCTURAL cost of the PEP rewrite, re-measured through the
+# REAL guard so the offline test calibrates the pure predictor (overhead.py) vs this live CSV. The
+# headline is a BOUND (no super-linear term), not a latency; a fenced wall-clock corroborates.
+# ─────────────────────────────────────────────────────────────────────────────
+def overhead(env, outdir="results", write=True):
+    """§4.8: per persona×model, the forced-domain leaf count + relation-path depth + mask-surface
+    count the PEP adds — measured LIVE via `guard._authz_domain` + `sensitivity.partition_fields`
+    (opposite side from the pure `overhead.py` predictor, so the calibration has teeth). Byte-stable
+    (no ids/timing). Also prints an INDICATIVE wall-clock (NOT gated). NO LLM; not in `ci_gate`."""
+    assert POLICY == ovh_svc.POLICY, "POLICY drift: pep_guard.POLICY != overhead.POLICY fixture"
+    companies, _ = seed(env)
+
+    rows = []
+    for persona_key, spec in PERSONAS.items():          # declared order
+        user = make_persona(env, persona_key, companies)
+        guard = _persona_env(env, user, spec)["pg.agent.guard"]
+        clearance = guard._user_clearance()             # LIVE clearance resolution
+        for model, entry in POLICY.items():             # declared order
+            leaves = guard._authz_domain(model)         # LIVE forced row-domain
+            paths = {p for p, _o, _v in (leaves or [])}
+            surface = sorted(sensitivity.SENSITIVITY.get(model, {}).keys())
+            _vis, masked = sensitivity.partition_fields(model, surface, clearance)   # LIVE mask
+            rows.append({
+                "persona": persona_key, "model": model, "clearance": clearance,
+                "authz_leaves": -1 if leaves is None else len(leaves),
+                "closure_hops": max((p.count(".") for p, _o, _v in (leaves or [])), default=0),
+                "team_scoped": entry.get("team_path") in paths,
+                "company_scoped": entry.get("company_path") in paths,
+                "owner_scoped": entry.get("owner_path") in paths,
+                "sensitivity_surface": len(surface),
+                "masked_fields": len(masked),
+                "mask_cost_class": ovh_svc.MASK_COST_CLASS,
+            })
+
+    leaf_max = max(r["authz_leaves"] for r in rows)
+    hop_max = max(r["closure_hops"] for r in rows)
+    print("\n=== ERP-AuthZBench — PEP structural overhead (§4.8, bounded) ===")
+    print(f"  rows={len(rows)}  authz_leaves<={leaf_max}  closure_hops<={hop_max}  "
+          f"masking={ovh_svc.MASK_COST_CLASS}  (no per-row query / join explosion / quadratic term)")
+    _overhead_wall_clock(env, companies)
+
+    if write:
+        os.makedirs(outdir, exist_ok=True)
+        _write_csv(os.path.join(outdir, "overhead.csv"), ovh_svc.FIELDS, rows)
+        print(f"Wrote overhead.csv ({len(rows)} rows) -> {outdir}/\n")
+    return rows
+
+
+def _overhead_wall_clock(env, companies, n=200):
+    """INDICATIVE wall-clock — PRINTED, never written to a gated file. Python/Odoo timing is noisy
+    (GC, ORM variance); we report RELATIVE medians on the seed=42 corpus, NOT a generalizable
+    percentage. The undefended baseline does LESS work (children unruled), so guarded/native bounds
+    the cost of CORRECTNESS, not pure framework overhead. Denial floor=0 so timing isn't padded."""
+    import statistics
+    spec = PERSONAS["ttv"]
+    user = make_persona(env, "ttv", companies)
+    penv = _persona_env(env, user, spec)
+    guard = penv["pg.agent.guard"]
+    model = "pco.sale.order.line"
+    q = {"domain": [], "fields": sorted(sensitivity.SENSITIVITY.get(model, {}).keys())}
+    if denial_svc:
+        denial_svc.DENIAL_CONFIG["min_latency_ms"] = 0
+        denial_svc.DENIAL_CONFIG["jitter_ms"] = 0
+
+    def _time(fn):
+        out = []
+        for _ in range(n):
+            t = time.perf_counter(); fn(); out.append(time.perf_counter() - t)
+        return out
+
+    t_native = _time(lambda: _run_op_unguarded(penv[model], "search_read", q))
+    t_action = _time(lambda: _run_op_action_authz(penv, model, "search_read", q))
+    t_guard = _time(lambda: _run_op_guarded(guard, model, "search_read", q))
+    us = lambda ts: (statistics.median(ts) * 1e6, min(ts) * 1e6)
+    nm, na, ng = us(t_native), us(t_action), us(t_guard)
+    ratio = nm[0] and ng[0] / nm[0]
+    print(f"  wall-clock search_read(line) median/min us (N={n}, one machine, NOT gated): "
+          f"native {nm[0]:.1f}/{nm[1]:.1f}  action-authz {na[0]:.1f}/{na[1]:.1f}  guarded {ng[0]:.1f}/{ng[1]:.1f}")
+    print(f"  guarded/native median = {ratio:.2f}x — INDICATIVE only (constant-factor-dominated on a 32-order "
+          f"corpus; noisy; bounds the cost of correctness, not pure overhead). The structural table is the claim.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ABAC/ReBAC formalization (RQ7) — the guard's POLICY is an instance of a general
 # (ReBAC relation-path x ABAC attribute-predicate x subject-context) model.
 # Pure algebra in data/erp_authzbench/policy_model.py; this driver proves the live round-trip.
@@ -1640,5 +1724,6 @@ def export_results(env, outdir="results"):
     # Write/mutation plane (RQ10) — separate CSV, NOT folded into results.json so the read
     # CORE tables stay byte-identical (the built-in proof the write-ACL grant is read-safe).
     wa = write_attacks(env, outdir=outdir)
-    return {"plane_comparison": plane, "ablation": abl,
-            "adaptive_probing": adp, "denial_channel": denial, "write_attacks": wa}
+    ovh = overhead(env, outdir=outdir)          # §4.8 structural overhead (separate CSV; prints wall-clock)
+    return {"plane_comparison": plane, "ablation": abl, "adaptive_probing": adp,
+            "denial_channel": denial, "write_attacks": wa, "overhead": ovh}

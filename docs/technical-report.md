@@ -224,6 +224,32 @@ ACL grant is **read-safe** — every read table in §4 stays byte-identical, whi
 byte-diff. *Not a defect claim:* a confused-deputy WRITE from a header-incomplete config, the same class as the
 read gap, closed by the same predicate pushdown — now enforced on writes.
 
+### 4.8 Overhead / cost · [`overhead.csv`](../results/overhead.csv)
+
+The PEP rewrites every query (forced row-domain + masking + uniform-denial), so we characterize its cost. The
+headline is a **structural bound** — proof the added work has **no super-linear term** — not a latency.
+[`overhead.csv`](../results/overhead.csv) (20 rows, persona × model; byte-stable, re-derived live through the
+guard and calibrated offline by `overhead.py`) shows that per query the rewrite adds at most `authz_leaves` ≤ **3**
+conjuncts AND-ed onto the caller domain, each a traversal of relation-path depth `closure_hops` ≤ **1** (a child
+reaches its team/company definer through the single FK `order_id` — the same BFS closure §5.4 certifies), realized
+by Odoo as an INNER JOIN **or** a correlated sub-select over the **indexed** FK; plus a post-fetch mask scan of
+`O(result_rows × masked_fields)` (masking is in-process over already-fetched rows, **no extra DB round-trip**). The
+added predicates are indexed equality/`in` conjuncts: **no per-row query, no join explosion, no quadratic term, no
+closure deeper than the policy already names**. (A see-all persona drops the team leaf → fewer conjuncts;
+`masked_fields` is computed over the model's *full declared sensitivity surface*, a conservative upper bound, not a
+query-specific subset.)
+
+**Corroboration (indicative, not gated).** `overhead(env)` also prints a wall-clock microbenchmark — N=200 iters of
+`search_read` native vs action-authz vs guarded, denial floor=0 — reported as **relative medians on one machine**,
+never byte-committed. **Anti-claims:** this is **not** a production load / throughput / concurrency study, **not** a
+committed query-planner analysis (we admit JOIN-or-sub-select, asserting only the bound), and the wall-clock ratio
+is constant-factor-dominated on a 32-order corpus and does **not** generalize to a percentage; the guarded path
+does strictly more authorization than the under-secured native baseline by design, so the ratio bounds the **cost
+of correctness**, not pure framework overhead; the uniform-denial latency floor is a **configurable** knob
+(`DENIAL_CONFIG`, =0 here), a knob, not counted as overhead. The claim is that the added work is *statically
+bounded* — leaf/hop/mask counts are work-bounding parameters (the asymptotic shape), which a microbenchmark on a
+toy corpus cannot establish and the structural table can.
+
 ---
 
 ## 5. PCC-ERP: a policy-closure compiler
@@ -576,6 +602,9 @@ Agents."*
   confused-deputy writes on the child relations (closed by the USING + WITH-CHECK write-check); bulk/mass writes,
   workflow/state-machine transitions, field-level write-masking, and a write-side existence-inference channel are
   named future work. The non-vacuity rests on a realistic operational-write ACL grant (read-safe by byte-diff).
+- **Overhead is a structural bound, not a load test (§4.8):** `overhead.csv` certifies the added work is bounded
+  (≤3 indexed conjuncts, ≤1 indexed-FK hop, O(result×masked) masking); the wall-clock is one-machine indicative,
+  not committed. No production-scale throughput/concurrency/latency-percentile study and no committed query plan.
 - **Read/write-scoped:** prompt-injection elimination and infrastructure threats are out of scope; prompt
   injection is "reduced + measured", not "eliminated".
 

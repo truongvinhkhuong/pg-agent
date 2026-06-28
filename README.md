@@ -61,6 +61,7 @@ pg-agent/
 │   ├── docrag.py                   # RQ8 L5: pure Doc-RAG corpus + deterministic lexical retriever (no LLM)
 │   ├── agent_loop.py               # End-to-end agent-loop proxy: ScriptedAgent + LLMAgent seam (no LLM in CI)
 │   ├── write_model.py              # RQ10: pure write/mutation attack suite + expected verdicts (no Odoo)
+│   ├── overhead.py                 # §4.8: pure structural-overhead predictor (authz leaves/hops/mask, no Odoo)
 │   ├── integrity.py                # T4.3 integrity test set + wrong-formula set (symbolic gold) — RQ6
 │   ├── metrics.py                  # TB.3 governed-metrics registry (no Odoo)
 │   ├── consistency.py              # TB.2 pure execution-voting core (no Odoo)
@@ -77,6 +78,7 @@ pg-agent/
 │   ├── test_numeric_verifier.py    # offline pytest — numeric verifier (no Odoo)
 │   ├── test_rls_model.py           # RQ9: offline calibration + SQL safety-lint for the Postgres-RLS plane
 │   ├── test_write_model.py         # RQ10: offline calibration + invariants for the write/mutation plane
+│   ├── test_overhead.py            # §4.8: offline calibration + bound invariants for the overhead plane
 │   └── test_metrics_and_consistency.py  # offline pytest — metrics + voting + TB.1 blind-spot (no Odoo)
 ├── tools/                          # opt-in / Artifact-Evaluation harness (see REPRODUCE.md, `make`)
 │   ├── reproduce.sh                # one-command isolated reproduce + byte-diff (postgres:16 + odoo:19)

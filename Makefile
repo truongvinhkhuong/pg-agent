@@ -7,7 +7,7 @@ PY ?= python3
 OFFLINE := test_output_validator test_sensitivity_registry test_policy_closure test_policy_scan \
            test_policy_emit test_pushdown_soundness test_policy_model test_numeric_verifier \
            test_metrics_and_consistency test_redteam test_docrag test_agent_loop test_endemic \
-           test_rls_model test_write_model
+           test_rls_model test_write_model test_overhead
 
 help:
 	@echo "make test          # offline unit tests (no Docker/LLM/network) — seconds"

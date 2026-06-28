@@ -265,6 +265,27 @@ operational-write ACL grant is \textbf{read-safe} (every \S4 read table stays by
 Not a defect claim --- a confused-deputy WRITE from a header-incomplete config, the same class as the read gap,
 now enforced on writes.
 
+\subsection{Overhead / cost}
+\code{results/overhead.csv}. The PEP rewrites every query, so we characterize its cost as a \textbf{structural
+bound} --- proof the added work has \textbf{no super-linear term} --- not a latency. Over 20 rows (persona
+$\times$ model; byte-stable, re-derived live through the guard and calibrated offline by \code{overhead.py}), the
+rewrite adds at most \code{authz\_leaves} $\le$ \textbf{3} conjuncts AND-ed onto the caller domain, each a
+traversal of relation-path depth \code{closure\_hops} $\le$ \textbf{1} (a child reaches its team/company definer
+through the single FK \code{order\_id}, the same BFS closure \S5.4 certifies), realized by Odoo as an INNER JOIN
+\emph{or} a correlated sub-select over the \textbf{indexed} FK; plus a post-fetch mask scan of
+\code{O(result\_rows * masked\_fields)} (in-process, \textbf{no extra round-trip}). The added predicates are
+indexed equality/\code{in} conjuncts: \textbf{no per-row query, no join explosion, no quadratic term}.
+\code{masked\_fields} is computed over the model's \emph{full declared sensitivity surface} --- a conservative
+upper bound, not a query-specific subset. \textbf{Corroboration (indicative, not gated):} \code{overhead(env)}
+prints a wall-clock microbenchmark (N=200, native vs action-authz vs guarded, denial floor=0) as relative medians
+on one machine, never byte-committed. \textbf{Anti-claims:} not a production load/throughput/concurrency study,
+not a committed query-planner analysis (JOIN-or-sub-select admitted, only the bound asserted), the wall-clock
+ratio is constant-factor-dominated on a 32-order corpus and does not generalize to a percentage; the guarded path
+does strictly more authorization than the under-secured baseline by design (the ratio bounds the cost of
+\emph{correctness}, not pure overhead); the uniform-denial floor is a configurable knob (=0 here), not counted as
+overhead. The claim is that the added work is \emph{statically bounded} --- which a microbenchmark on a toy corpus
+cannot establish and the structural table can.
+
 % =====================================================================
 \section{PCC-ERP: a policy-closure compiler}
 PG-Agent's per-model row closures are a hand-written \code{POLICY} today. PCC-ERP \textbf{derives} them and
@@ -610,6 +631,9 @@ framing: \emph{``Policy-Closure Compilation for Row-Level Authorization in ERP L
         bulk/mass writes, workflow/state-machine transitions, field-level write-masking, and a write-side
         existence channel are named future work; non-vacuity rests on a realistic operational-write ACL grant
         (read-safe by byte-diff).
+  \item \textbf{Overhead is a structural bound, not a load test (\S4.8):} \code{overhead.csv} certifies the added
+        work is bounded (\(\le\)3 indexed conjuncts, \(\le\)1 indexed-FK hop, O(result\(\times\)masked) masking);
+        the wall-clock is one-machine indicative, not committed; no throughput/concurrency study, no committed plan.
   \item \textbf{Read/write-scoped:} prompt-injection elimination and infrastructure threats are out of scope;
         prompt injection is ``reduced + measured'', not ``eliminated''.
 \end{itemize}

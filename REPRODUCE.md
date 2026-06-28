@@ -45,6 +45,7 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 | 4.5 | non-composability (V-rule) | reinstall V-rule → `export_results` | `results/vrule/*.csv` | **core (2nd variant)** |
 | 4.6 | regression gate | `ci_gate(env)` (both variants) | stdout `BENCH_GATE: PASS` | **core** |
 | 4.7 | write-path confused-deputy + fix (RQ10) | `write_attacks(env)` (in `export_results`) | `results/write_attacks.csv` | **reproduce-all (byte-stable)** |
+| 4.8 | PEP structural overhead (bounded) | `overhead(env)` (in `export_results`) | `results/overhead.csv` | **reproduce-all (byte-stable)** |
 | 5.2 | CE scale scan | `scan(env, …)` | `results/scale/coverage.csv` | scale |
 | 5.2.1 | endemicity (11 CE apps) | `scan_corpus(env, …)` | `results/scale/corpus/` | **scale (env-sensitive)** |
 | 5.3 | emit + verify | `emit_classify(env)` | `results/scale/emit.csv` | scale |
@@ -64,6 +65,9 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 - **§4.2** each defense layer zeroes a distinct metric; full stack → Unauthorized 0/4, Data-Leakage 0/2,
   Answer-Leak safe, Existence-Inference 0/1.
 - **§4.4** Existence-Inference 1/1 (denial OFF) → 0/1 (denial ON).
+- **§4.8** PEP overhead is **statically bounded**: ≤3 indexed conjuncts, closure depth ≤1 (one indexed-FK hop),
+  O(result×masked_fields) post-fetch masking — no per-row query / join explosion / quadratic term (`overhead.csv`,
+  20 rows, byte-stable); a wall-clock ratio is **printed** (indicative, one machine, not committed).
 - **§4.7** write/mutation plane: all 12 confused-deputy writes breach undefended → **guarded 0 residual-leak**
   (every one `held`); under V-rule the naive line rule plugs line create/overwrite/unlink but reassignment +
   the payment/guarantee siblings still breach (all held by the PEP).
@@ -93,6 +97,11 @@ only `pgagent-ae_*`. No `.env`/credentials are read by the core path.
   no real model are included; only the *measurement instrument* (`evaluation_script.py` / `ci_gate`) is public.
 - `config/odoo.mock.conf` documents the **source-install** addons layout; the Docker path passes
   `--addons-path` explicitly (the image layout differs).
+- **§4.8 (overhead)** `overhead.csv` records **STRUCTURAL bounds** (leaf/hop/mask-surface counts — pure functions
+  of POLICY+SENSITIVITY), byte-stable. The wall-clock microbenchmark is **PRINTED** by `overhead(env)` (one
+  machine, N=200, relative medians — Python/Odoo timing is noisy), **NOT** byte-committed. We claim the added work
+  is *statically bounded*, not a latency; no production load test, no committed `EXPLAIN`; the uniform-denial floor
+  is a configurable knob (=0 here), not counted as overhead.
 - **§4.7 (write/mutation plane)** is a deliberate, justified **scope expansion** (the read suite is read-only;
   the agent genuinely issues create/write/unlink tool-calls). It needs operational write ACL on the child models
   (the realistic ERP misconfiguration: write granted, record-rule scoping forgotten); this is **read-safe** — the
