@@ -1,0 +1,900 @@
+% =====================================================================
+%  paper.tex -- LaTeX port of docs/technical-report.md (results-led).
+%  Numbers are unchanged; this is a faithful typeset of the canonical report.
+%
+%  Compile (pdfLaTeX -- Vietnamese example strings via T5 + lmodern):
+%      latexmk -pdf docs/paper.tex
+%  or (XeLaTeX / LuaLaTeX -- native UTF-8 via fontspec):
+%      latexmk -xelatex docs/paper.tex
+%
+%  Retargeting to a venue: the body is class-agnostic. Swap the
+%  \documentclass + a few preamble lines for IEEEtran / acmart / llncs;
+%  the \section/\subsection/tabular/itemize body carries over unchanged.
+% =====================================================================
+% =====================================================================
+%  paper_fdse.tex -- Springer LNCS/CCIS (llncs) variant for an FDSE submission.
+%  Compile with pdfLaTeX (canonical Springer path):  make paper-fdse
+%  Body/figures shared with paper.tex; only front matter + bibliography differ.
+%  paper.tex stays the generic/arXiv article version; technical-report.md is canonical.
+% =====================================================================
+\documentclass[runningheads]{llncs}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{underscore}      % literal _ in text/\texttt (identifiers, file names)
+\usepackage{amssymb}         % \square (soundness-theorem QED marker)
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tikz}            % Fig.1/F4/F6 diagrams
+\usetikzlibrary{positioning,arrows.meta,calc}
+\usepackage{pgfplots}        % Fig.5 endemicity bar chart
+\pgfplotsset{compat=1.18}
+\usepackage{enumitem}
+\usepackage[table]{xcolor}    % `table` -> \cellcolor for the Fig.2 plane matrix
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\code}[1]{\texttt{#1}}
+
+\begin{document}
+
+\title{PG-Agent \& ERP-AuthZBench: Authorization-Preserving LLM Agents over ERP, with a Policy-Closure Compiler}
+\titlerunning{Authorization-Preserving LLM Agents over ERP}
+\author{Truong Vinh Khuong}
+\authorrunning{T. V. Khuong}
+\institute{Affiliation to be completed\\ \email{author@example.com}}
+\maketitle
+
+\begin{abstract}
+Enterprises are wiring tool-calling LLM agents into ERP systems to answer business questions in natural
+language. We identify an authorization failure these agents expose at the \textbf{data-result plane}: a tool
+call that is perfectly valid at the \emph{control plane} (an allowed model, valid parameters) still returns
+rows the user may not see, because the agent autonomously queries a \textbf{child model whose row-level record
+rule is missing} while the parent's rule is present --- \emph{relational-traversal bypass}. This is a
+confused-deputy / BOLA~\cite{owaspbola} gap that warehouse-native governed-NL-analytics platforms (which inherit complete
+governance from the warehouse) and action-plane authorization frameworks (which authorize the call, not the
+rows) do not address for ERP. We contribute: (i) \textbf{ERP-AuthZBench}, an adversarial benchmark for
+row-level authorization of ERP LLM agents; (ii) \textbf{PG-Agent}, a model-agnostic data-result-plane Policy
+Enforcement Point (PEP) that is clean on every benchmark class; and (iii) \textbf{PCC-ERP}, a policy-closure
+compiler that \emph{derives} the per-model row-level closures from the ORM relation graph + existing record
+rules, emits them as enforceable policy, and runtime-verifies gap closure --- validated on the mock
+end-to-end and at corpus scale on vanilla Odoo CE, where the relational-traversal gap proves \textbf{endemic}
+(15 gaps recurring across 6 of 8 business domains). On the orthogonal reliability axis
+(RQ6) we adopt a three-layer \textbf{integrity} stack (numeric verifier + governed metrics + execution-guided
+self-consistency) that drives the silently-wrong-number rate to zero and catches
+correct-arithmetic-with-the-wrong-formula --- framed as applied, not novelty. We additionally (iv)
+regression-gate the residual-risk surface with a deterministic, LLM-free \textbf{red-team grammar} that
+exhausts the ORM-pivot space (T4.5+); (v) \textbf{formalize} the bespoke POLICY as an instance of a general
+\textbf{ABAC$\times$ReBAC} subject-context model whose compiler reproduces the guard's exact authorization
+domain (RQ7); (vi) extend the PEP to a \textbf{Doc-RAG retrieval plane} that delivers chunks only
+re-rendered from row-authorized, clearance-masked sources (RQ8); and (vii) show the gap is
+\textbf{paradigm-level, not an Odoo artifact} by reproducing the same relational-traversal leak and the same
+predicate-pushdown fix on a second engine, \textbf{PostgreSQL RLS} (RQ9); and (viii) extend the threat model to
+\textbf{mutations} --- a forced write-check (USING + WITH-CHECK) closes the confused-deputy \emph{write} gap on
+create/write/unlink (RQ10), 12/12 breaching writes held.
+
+The contribution is scoped honestly to \textbf{applied security + benchmark + reference implementation} for an
+under-served setting (ERP record-rule governance that is incomplete on child models), not to a novel
+unification of authorization and integrity (prior art) nor to novel soundness on arbitrary policy domains.
+
+\keywords{LLM agents \and ERP security \and row-level authorization \and policy enforcement point \and
+confused deputy \and relational-traversal \and Odoo \and PostgreSQL RLS \and policy-closure compiler}
+\end{abstract}
+
+% =====================================================================
+\section{Problem}
+
+\subsection{Control plane vs data-result plane}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Control plane (action):} ``may the agent call tool \emph{T} with parameters \emph{P}?'' ---
+        the plane that pre-action authorization frameworks (OAP, PCAS, SEAgent, AgentGuardian) govern.
+  \item \textbf{Data-result plane:} ``do the rows \emph{T} returns match the record-rule the user is entitled
+        to?'' This is the axis we attack, in the setting where ERP governance is \textbf{incomplete}
+        (Figure~\ref{fig:arch}).
+\end{itemize}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[font=\small,>=Latex,
+  box/.style={draw,rounded corners,align=center,inner sep=4pt}]
+  \node[box,fill=red!6,text width=23mm] (agent)
+    {LLM agent\\[1pt]{\footnotesize plans ORM tool-calls}\\[1pt]{\footnotesize\textit{untrusted}}};
+  \node[box,fill=green!6,right=27mm of agent,align=left,text width=48mm] (pep)
+    {\textbf{PG-Agent PEP} {\scriptsize(data-result plane)}\\[2pt]
+     {\footnotesize 1.~forced row-domain (USING)}\\
+     {\footnotesize 2.~sensitivity masking}\\
+     {\footnotesize 3.~output validation}\\
+     {\footnotesize 4.~uniform denial}\\
+     {\footnotesize 5.~write-check (WITH CHECK)}\\
+     {\footnotesize 6.~independent audit}};
+  \node[box,right=24mm of pep,align=left,text width=32mm] (db)
+    {\textbf{Odoo ORM / Postgres}\\[2pt]
+     {\footnotesize \texttt{order} (header)~--- rule\,\checkmark}\\
+     {\footnotesize \texttt{line}/\texttt{payment}/}\\
+     {\footnotesize \texttt{guarantee} (child)~--- \emph{no rule}}};
+  \draw[->] (agent) -- node[above,font=\scriptsize]{tool-calls} (pep);
+  \draw[->] (pep) -- node[above,font=\scriptsize]{forced domain} node[below,font=\scriptsize]{+ write-check} (db);
+  \draw[dashed,thick] ([yshift=8mm]$(agent.east)!0.5!(pep.west)$) -- ([yshift=-9mm]$(agent.east)!0.5!(pep.west)$);
+  \node[font=\scriptsize,align=center] at ([yshift=11mm]$(agent.east)!0.5!(pep.west)$) {trust\\boundary};
+  \draw[->,red,dashed] (agent.south) to[out=-25,in=-155]
+    node[below,font=\scriptsize,red,align=center,pos=0.5]
+    {direct child query/write = \emph{relational-traversal} bypass\\(closed by the PEP)} (db.south);
+\end{tikzpicture}
+\caption{\textbf{PG-Agent at the data-result plane.} The LLM stays \emph{outside} the security boundary: it
+only emits ORM tool-calls; the PEP forces an authorization domain (reads) and a write-check (mutations) before
+the ORM. Native Odoo governs the \texttt{order} header but not its children, so a \emph{direct} child
+query/write is a confused-deputy relational-traversal bypass (red) --- which the PEP closes.}
+\label{fig:arch}
+\end{figure}
+
+\subsection{Why ERP differs from warehouse-native}
+Warehouse-native governed-NL-analytics (Snowflake Cortex Analyst, Databricks Genie, MS Fabric Data Agent)
+\textbf{inherit complete governance} from the warehouse (RBAC, RLS, column masks applied uniformly at query
+time). ERP (Odoo) enforces row security via \textbf{ORM record rules} that, in practice, \textbf{do not cover
+every relation}: a team rule sits on the order header but not on its lines/payments/guarantees. Odoo record
+rules are \textbf{default-allow} --- if an ACL grants access and no rule applies to the model/operation/user,
+the rows are returned. An LLM agent enlarges the attack surface precisely because it autonomously chooses the
+child/tool path a human rarely takes. (This direct-child-query bypass is documented native RLS behavior in
+other engines too --- e.g.\ SQL Server applies a parent predicate only when the child is queried \emph{via}
+the parent --- so the phenomenon is general; the novelty is its agent-driven exploitation in ERP + the
+benchmark + the closure compiler. We make this cross-engine claim concrete by reproducing the same gap and the
+same pushdown fix on \textbf{PostgreSQL RLS in \S5.5 (RQ9)}.)
+
+\subsection{Threat model (summary)}
+Attacker = an employee probing beyond scope / prompt-injection / chaining, with a real role, natural-language
+prompts only, no code or policy edits, observing refusal responses + latency. Defender = a deterministic PEP
+at the data-result plane, with the \textbf{LLM kept outside the security boundary} (it does not decide
+authorization --- OrgAccess~\cite{orgaccess} shows GPT-4.1~\cite{gpt41} reaches only F1$\approx$0.27 on RBAC reasoning). The primary suite is
+\textbf{read-scoped}; \S4.7 (RQ10) deliberately \textbf{extends the threat model to mutations} --- an agent that
+issues \code{create}/\code{write}/\code{unlink} tool-calls --- with the same gap and the same pushdown fix on the
+write side. Out of scope: infrastructure RCE, bulk/workflow-state mutations, model extraction.
+
+\subsection{Research questions (RQ1--RQ10)}
+The benchmark + PEP answer ten questions. RQ1--RQ5 are the canonical read-plane PEP questions (contributions
+(i)--(ii)); RQ6--RQ10 are the extensions (contributions (iv)--(viii)).
+
+\begin{itemize}[leftmargin=*,nosep]
+  \item \textbf{RQ1} (\S4.1) forced row-domain closes the relational-traversal leak the inherited-RBAC /
+        action-authz planes miss; \textbf{RQ2} (\S4.2) masking stops confidential field/measure exposure;
+        \textbf{RQ3} (\S4.2) each defense layer zeroes a distinct metric; \textbf{RQ4} (\S4.3) robustness to
+        adaptive path-switching + an exhaustive ORM-pivot grammar; \textbf{RQ5} (\S4.4) uniform denial closes the
+        existence-inference channel.
+  \item \textbf{RQ6} (\S6) integrity stack drives silently-wrong + wrong-formula numbers to zero; \textbf{RQ7}
+        (\S5.4) POLICY is an instance of a general ABAC$\times$ReBAC model whose compiler reproduces it;
+        \textbf{RQ8} (\S7) the PEP extends to a Doc-RAG retrieval plane; \textbf{RQ9} (\S5.5) the gap reproduces
+        on a second engine (PostgreSQL RLS); \textbf{RQ10} (\S4.7) a forced write-check (USING + WITH-CHECK)
+        closes the confused-deputy \emph{write} gap.
+\end{itemize}
+\noindent PCC-ERP (derive$\to$emit$\to$verify, contribution (iii)) underpins RQ1/RQ7; \S4.8 characterizes the
+PEP's overhead as a cost study, not a separate RQ.
+
+% =====================================================================
+\section{ERP-AuthZBench}
+A public, reproducible adversarial benchmark for row-level authorization of ERP LLM agents.
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Schema mock} (\code{addons/pco_core_mock}): a 4-model sale cluster --- \code{pco.sale.order}
+        (header, carries \code{team_code} + \code{company_id}) and three children
+        (\code{.line}/\code{.payment}/\code{.guarantee}, each \code{order_id} $\to$ header). Authz-relevant
+        field \emph{names} are kept verbatim (they are the guard contract); no business logic, no real data.
+  \item \textbf{Two schema variants} (the heart of the benchmark): \textbf{V-vuln} = team rule on the header
+        only (faithful to production); \textbf{V-rule} = a na\"ive fix that adds a rule on the line but
+        forgets the payment/guarantee siblings. The guard column is variant-independent by construction.
+  \item \textbf{Synthetic data} (\code{generate_synthetic.py}): deterministic (\code{seed=42}), generated ---
+        never anonymized from production.
+  \item \textbf{Attack suite} (\code{attacks.py}): 5 core classes (\code{relational-traversal},
+        \code{aggregation-leak}, \code{sensitive-field-extraction}, \code{sensitive-measure-aggregation},
+        \code{existence-inference}) + grounded extensions (\code{tenant-bypass}, \code{attribute-confusion}) +
+        an \textbf{adaptive} residual-risk suite (\code{adaptive.py}).
+  \item \textbf{Oracle harness} (\code{evaluation_script.py}): each attack runs against a ground-truth oracle
+        under three planes (native ir.rule, OAP-style action-authz, PG-Agent PEP); pass/fail is
+        \textbf{measured, not asserted}. \emph{Caveat:} the headline numbers are oracle-based (deterministic
+        ORM-level attacks); \S10.1.1 adds one \textbf{real-LLM run} over the public synthetic corpus as an
+        empirical proxy, and the full end-to-end integration is validated separately in the private monorepo.
+\end{itemize}
+
+% =====================================================================
+\section{PG-Agent: the data-result-plane PEP}
+A model-agnostic PEP (\code{pg_agent_guard}) the agent must call instead of the ORM:
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Row-domain enforcement} --- inject a forced row-level domain (team/company/owner) per model,
+        including the relation-traversal path for children (\code{order_id.team_code}); \textbf{fail-closed} on
+        any model not in policy.
+  \item \textbf{Sensitivity-aware masking} --- drop above-clearance fields \emph{before} the LLM context; deny
+        confidential \code{read_group} measures and above-clearance group-keys.
+  \item \textbf{Output validation} --- scan the final answer for leaked masked / cross-team values.
+  \item \textbf{Uniform denial} --- identical empty result + constant-time/jitter, defeating
+        existence-inference via the denial channel.
+  \item \textbf{Independent audit} --- per-call decision log (stdlib, isolated from any AGPL audit module).
+  \item \textbf{Write-check (RQ10, \S4.7)} --- \code{guarded\_create}/\code{guarded\_write}/\code{guarded\_unlink}
+        add the mutation analogue: \textbf{USING} (a write/unlink target row must be in the forced row-domain) +
+        \textbf{WITH-CHECK} (any governed FK being set must resolve to an in-domain parent, read via sudo).
+\end{enumerate}
+
+% =====================================================================
+\section{Evaluation (real numbers)}
+All tables below are the committed reference copies in \code{results/} (V-vuln) and \code{results/vrule/},
+regenerated by \code{export_results(env)} in an Odoo 19 shell.
+
+\subsection{Plane comparison --- the headline (V-vuln)}
+\code{results/plane_comparison.csv}. Figure~\ref{fig:plane} is the headline result.
+
+\begin{figure}[t]
+\centering
+\setlength{\tabcolsep}{8pt}\renewcommand{\arraystretch}{1.2}\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Attack class} & \textbf{Inherited-RBAC} & \textbf{Action-authz} & \textbf{PG-Agent} \\
+                      & {\scriptsize ir.rule}   & {\scriptsize OAP}     & {\scriptsize PEP} \\
+\midrule
+relational-traversal          & \cellcolor{red!15}LEAK  & \cellcolor{red!15}LEAK     & \cellcolor{green!18}safe \\
+aggregation-leak              & \cellcolor{red!15}LEAK  & \cellcolor{red!15}LEAK     & \cellcolor{green!18}safe \\
+sensitive-field-extraction    & \cellcolor{red!15}LEAK  & \cellcolor{red!15}LEAK     & \cellcolor{green!18}safe \\
+sensitive-measure-aggregation & \cellcolor{red!15}LEAK  & \cellcolor{red!15}LEAK     & \cellcolor{green!18}safe \\
+tenant-bypass                 & \cellcolor{red!15}LEAK  & \cellcolor{red!15}LEAK     & \cellcolor{green!18}safe \\
+existence-inference           & \cellcolor{red!15}infer & \cellcolor{green!18}indist & \cellcolor{green!18}indist \\
+\bottomrule
+\end{tabular}
+\caption{\textbf{Plane comparison (V-vuln) --- the headline.} Red = leak/insecure, green =
+safe/indistinguishable. Inheriting native record rules (inherited-RBAC) and authorizing the \emph{call}
+(action-authz / OAP) both leak rows of permitted models --- the confused-deputy gap --- while only the
+data-result-plane PEP is secure on every class. Mirrors \code{results/plane\_comparison.csv}.}
+\label{fig:plane}
+\end{figure}
+
+Row+field leak rate: inherited-RBAC \textbf{5/6}, action-authz \textbf{5/6}, PG-Agent \textbf{0/6}
+(false-block 0/2). \textbf{N4a/N5:} action-authz \emph{denies a call to a non-whitelisted model} yet still
+\textbf{leaks rows of permitted models} (the confused-deputy gap); inheriting native governance is incomplete.
+Only the data-result-plane PEP closes the case.
+
+\subsection{Defense-in-depth ablation (V-vuln)}
+\code{results/ablation.csv}. Figure~\ref{fig:ablation} is the ladder.
+
+% mirrors results/ablation.csv ; red = metric still open, green = closed; bold = the layer that closes it.
+\begin{figure}[t]
+\centering
+\setlength{\tabcolsep}{7pt}\renewcommand{\arraystretch}{1.2}\small
+\newcommand{\op}[1]{\cellcolor{red!15}#1}
+\newcommand{\cl}[1]{\cellcolor{green!18}#1}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Defense rung} & \textbf{Unauthorized} & \textbf{Data-leak} & \textbf{Answer-leak} & \textbf{Existence} \\
+\midrule
+no-defense (sudo)  & \op{4/4} & \op{2/2} & \op{leak} & \op{infer} \\
++ ir.rule (native) & \op{3/4} & \op{2/2} & \op{leak} & \op{infer} \\
++ PEP (row-domain) & \cl{\textbf{0/4}} & \op{2/2} & \op{leak} & \op{infer} \\
++ masking          & \cl{0/4} & \cl{\textbf{0/2}} & \op{leak} & \op{infer} \\
++ output-validation& \cl{0/4} & \cl{0/2} & \cl{\textbf{safe}} & \op{infer} \\
++ uniform-denial   & \cl{0/4} & \cl{0/2} & \cl{safe} & \cl{\textbf{0/1}} \\
+\bottomrule
+\end{tabular}
+\caption{\textbf{Defense-in-depth ablation (V-vuln).} Each rung adds one layer; red = the metric is still open,
+green = closed (bold = the layer that closes it). The staircase shows each layer zeroes a \emph{distinct} metric
+(PEP$\to$Unauthorized, masking$\to$Data-leak, output-validation$\to$Answer-leak, uniform-denial$\to$Existence) ---
+no layer is redundant. Mirrors \code{results/ablation.csv}.}
+\label{fig:ablation}
+\end{figure}
+
+\subsection{Adaptive probing --- residual risk}
+\code{results/adaptive_probing.csv}. 14 pivot variants test whether the PEP holds as an adversary switches
+paths. Every \textbf{in-scope} family holds with \textbf{0 residual leaks}: traversal-pivot 0/4,
+field-extraction-pivot 0/4, aggregation-structure-pivot 0/2, existence-pivot 0/2 (all fire undefended $\to$
+not vacuous). The \code{answer-channel-paraphrase} family is \textbf{out of PEP scope} and reports \textbf{2
+documented residuals} (a confidential value spelled in words / a code split by spaces evades the output
+validator's regex) --- measured by an independent ground-truth oracle, reported not hidden.
+
+\paragraph{Automated red-team (T4.5+).} \code{results/redteam.csv}. The 14 hand-picked pivots are a subset of a
+\textbf{deterministically-enumerated ORM-pivot grammar} (\code{redteam.py}) --- a strict super-set across the
+five families, expanded over the type-safe model $\times$ op $\times$ field axis to \textbf{41 variants}. Run
+through the same two-mode oracle (undefended = the automatic meaningfulness filter that prunes non-firing
+cells), every in-scope variant \textbf{holds --- residual-leak 0/41}: 34 fire on V-vuln; under V-rule more go
+\code{non-firing} (the native rule blocks line-traversal) while the forgotten payment/guarantee siblings still
+fire and hold. \code{ci_gate} fails on \textbf{any} in-scope grammar point that survives the guard. Honest:
+exhaustive over the \emph{grammar} (a modeled threat surface), \textbf{not} the universe of attacks;
+deterministic enumeration, \textbf{NO LLM} --- a structured fuzzer, not an ``AI red-team''.
+
+\subsection{Denial channel}
+\code{results/denial_channel.csv}. Existence-Inference Rate: \textbf{1/1 with uniform-denial OFF}
+(denial-rich baseline leaks existence) $\to$ \textbf{0/1 with uniform-denial ON}. The denial channel is real
+and the uniform-denial layer closes it.
+
+\subsection{Variant comparison --- non-composability (V-rule)}
+\code{results/vrule/}. The V-rule plane table differs from V-vuln by a \textbf{single row}:
+\code{relational-traversal} flips to \code{safe,safe} (the line rule plugs it) while \code{aggregation-leak}
+(payment) \textbf{stays \code{LEAK,LEAK}} for both baselines --- the na\"ive per-model fix forgets the sibling.
+Ablation \code{+ir.rule} improves to 2/4 (vs 3/4) but PEP is still needed for the rest. Adaptive mirrors it:
+\code{adpt-trav-line*} go \code{non-firing} (rule added) while payment/guarantee pivots stay \code{held}.
+\textbf{PG-Agent is safe/held in both variants} --- point fixes don't compose; the PEP does.
+
+\subsection{Regression gate}
+CI (\code{.github/workflows/ci.yml}) installs the addons in \textbf{Odoo 19 + Postgres} and runs
+\code{ci_gate(env)} over \textbf{both variants}; it fails unless Unauthorized = Data-Leakage =
+Existence-Inference = False-Block = 0, \textbf{no in-scope adaptive RESIDUAL-LEAK}, \textbf{no in-scope variant
+of the automated red-team grammar survives} (\S4.3), \textbf{no in-scope write/mutation survives the write-check}
+(\S4.7), and the benchmark is meaningful (attacks fire undefended). Any change that reopens a leak --- canonical
+path, a hand-picked pivot, an enumerated grammar point, \textbf{or} a confused-deputy write --- turns CI red.
+
+\subsection{Write-path / mutation enforcement (RQ10)}
+\code{results/write_attacks.csv}. The read suite is read-scoped; here we \textbf{extend the threat model to
+mutations}. Native Odoo does \textbf{not} re-apply a parent's record rule when a child is mutated \emph{directly},
+so once an operational user holds coarse create/write/unlink ACL on the child models --- the realistic ERP
+misconfiguration (sales staff legitimately manage an order's lines/payments/guarantees, but the record-rule
+scoping is forgotten on the children) --- the \textbf{confused-deputy WRITE} opens: a team-restricted persona can
+create a payment on \emph{another team's} order, overwrite/delete a foreign child row, or reassign an owned child
+onto a foreign order. The PEP closes it with \code{guarded\_create}/\code{guarded\_write}/\code{guarded\_unlink}:
+\textbf{USING} (the target row must be in the forced row-domain) + \textbf{WITH-CHECK} (any governed FK being set
+must resolve to an in-domain parent). Over 4 families $\times$ 3 child models = \textbf{12 confused-deputy writes}:
+under \textbf{V-vuln} all \textbf{12/12 breach undefended} and the write-check holds \textbf{0/12} (all
+\code{held}); under \textbf{V-rule} the naive line rule blocks line create/overwrite/unlink (\code{non-firing})
+but \textbf{reassign-line and the payment/guarantee siblings still breach} --- Odoo record rules enforce only
+USING, with \textbf{no \code{WITH CHECK} analogue}, so moving an owned line onto a foreign order survives the
+native rule --- all closed by the PEP's WITH-CHECK. \textbf{Method (honest):} each mutation runs inside a
+\code{SAVEPOINT} rolled back with \code{env.clear()} (discarding the ORM cache \emph{and} the pending-write queue,
+so a rolled-back write cannot re-flush into a later driver's aggregates); the driver asserts the DB --- rows,
+values and FKs --- is bit-for-bit back to seed; ``breach'' is measured from DB state via sudo \code{search\_count}
+(cache-independent), never the guard's verdict; the committed CSV records \textbf{verdicts only}; and the
+operational-write ACL grant is \textbf{read-safe} (every \S4 read table stays byte-identical, proven by byte-diff).
+Not a defect claim --- a confused-deputy WRITE from a header-incomplete config, the same class as the read gap,
+now enforced on writes.
+
+\subsection{Overhead / cost}
+\code{results/overhead.csv}. The PEP rewrites every query, so we characterize its cost as a \textbf{structural
+bound} --- proof the added work has \textbf{no super-linear term} --- not a latency. Over 20 rows (persona
+$\times$ model; byte-stable, re-derived live through the guard and calibrated offline by \code{overhead.py}), the
+rewrite adds at most \code{authz\_leaves} $\le$ \textbf{3} conjuncts AND-ed onto the caller domain, each a
+traversal of relation-path depth \code{closure\_hops} $\le$ \textbf{1} (a child reaches its team/company definer
+through the single FK \code{order\_id}, the same BFS closure \S5.4 certifies), realized by Odoo as an INNER JOIN
+\emph{or} a correlated sub-select over the \textbf{indexed} FK; plus a post-fetch mask scan of
+\code{O(result\_rows * masked\_fields)} (in-process, \textbf{no extra round-trip}). The added predicates are
+indexed equality/\code{in} conjuncts: \textbf{no per-row query, no join explosion, no quadratic term}.
+\code{masked\_fields} is computed over the model's \emph{full declared sensitivity surface} --- a conservative
+upper bound, not a query-specific subset. \textbf{Corroboration (indicative, not gated):} \code{overhead(env)}
+prints a wall-clock microbenchmark (N=200, native vs action-authz vs guarded, denial floor=0) as relative medians
+on one machine, never byte-committed. \textbf{Anti-claims:} not a production load/throughput/concurrency study,
+not a committed query-planner analysis (JOIN-or-sub-select admitted, only the bound asserted), the wall-clock
+ratio is constant-factor-dominated on a 32-order corpus and does not generalize to a percentage; the guarded path
+does strictly more authorization than the under-secured baseline by design (the ratio bounds the cost of
+\emph{correctness}, not pure overhead); the uniform-denial floor is a configurable knob (=0 here), not counted as
+overhead. The claim is that the added work is \emph{statically bounded} --- which a microbenchmark on a toy corpus
+cannot establish and the structural table can.
+
+% =====================================================================
+\section{PCC-ERP: a policy-closure compiler}
+PG-Agent's per-model row closures are a hand-written \code{POLICY} today. PCC-ERP \textbf{derives} them and
+closes the loop \textbf{discover $\to$ derive $\to$ emit $\to$ enforce $\to$ verify} (Figure~\ref{fig:pcc}). Pure
+cores (\code{policy_closure.py}, \code{domain_ast.py}, \code{policy_emit.py}) are offline-unit-tested; drivers run
+in an Odoo shell, read-only.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[font=\footnotesize,>=Latex,node distance=4mm and 9mm,
+  st/.style={draw,rounded corners,align=center,inner sep=3pt,minimum height=11mm,text width=20mm,fill=blue!5}]
+  \node[st] (disc) {\textbf{discover}\\models + M2O graph};
+  \node[st,right=of disc] (der) {\textbf{derive}\\BFS relation-path closure};
+  \node[st,right=of der] (emit) {\textbf{emit}\\native \texttt{ir.rule}};
+  \node[st,right=of emit] (enf) {\textbf{enforce}\\PG-Agent PEP};
+  \node[st,right=of enf] (ver) {\textbf{verify}\\runtime gap-closure};
+  \draw[->] (disc) -- (der); \draw[->] (der) -- (emit);
+  \draw[->] (emit) -- (enf); \draw[->] (enf) -- (ver);
+  \node[draw,dashed,rounded corners,below=5mm of emit,align=center,inner sep=2pt,font=\scriptsize,fill=yellow!12]
+    (gate) {soundness gate (\S5.3.1)\\emit only where pushdownable};
+  \draw[->,dashed] (gate) -- (emit);
+\end{tikzpicture}
+\caption{\textbf{PCC-ERP closes the policy loop.} Discover the ORM model + Many2one graph; derive each model's
+row-closure (the BFS relation-path to the team/company definer); emit a native \texttt{ir.rule} \emph{only}
+where the proved soundness gate (\S5.3.1) admits it; enforce via the PEP; runtime-verify gap closure.}
+\label{fig:pcc}
+\end{figure}
+
+\subsection{Differential linter on the mock}
+\code{results/policy_lint.csv}. From \code{ir.model.fields} + \code{ir.rule}, classify each
+\code{(model, axis)} as GOVERNED/GAP/ROOT-UNGOVERNED and derive the closure path; confirm each gap with a
+runtime differential test (child-direct vs closure-allowed rows). \textbf{V-vuln:} 3 team GAPs
+(line/payment/guarantee, closure \code{order_id.team_code}) + \code{LEAK}; company axis ROOT-UNGOVERNED
+everywhere (the tenant-bypass vector); \textbf{all derived paths reproduce the hand-written POLICY}
+(soundness). \textbf{V-rule:} line GOVERNED, payment/guarantee still GAP --- the linter auto-flags exactly the
+non-composable siblings the na\"ive fix missed.
+
+\subsection{Scale on vanilla Odoo CE}
+\code{results/scale/coverage.csv}. Generalized to any module set and run on
+\textbf{\code{sale}+\code{account}+\code{stock}} (private \code{pco_core} is off-limits to the public repo;
+validated separately via \code{odoo.prod.conf} in the private monorepo). Two semantic filters make it credible:
+\textbf{context-bound discriminators} (a field is an axis only if a rule leaf binds it to the user/company
+context --- \code{governance_fields}) and \textbf{containment-only edges} (\code{required + ondelete=cascade},
+so closures follow the composing parent, not audit/owner FKs).
+
+Result: \textbf{62 models, 15 containment edges, 6 discriminators}; \code{company_id} broadly \textbf{GOVERNED
+(34/41 reachable)} --- the scanner agrees with Odoo's multi-company design (soundness evidence); and \textbf{5
+genuine relational-traversal GAPs auto-discovered} on a real ERP it does not own:
+
+\begin{center}\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+child model & discriminator & derived closure \\
+\midrule
+\code{sale.order.line}                  & \code{user_id}          & \code{order_id.user_id} \\
+\code{account.payment.term.line}        & \code{company_id}       & \code{payment_id.company_id} \\
+\code{account.fiscal.position.account}  & \code{company_id}       & \code{position_id.company_id} \\
+\code{account.bank.statement.line}      & \code{invoice_user_id}  & \code{move_id.invoice_user_id} \\
+\code{stock.storage.category.capacity}  & \code{company_id}       & \code{storage_category_id.company_id} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Manual-burden (secondary, honest): 11 relational closures auto-derived vs the 9 hand-written \code{POLICY}
+paths ($\sim$1.2$\times$) --- CE containment chains are shallow, so the ratio is modest; the heavier target is
+the bespoke \code{pco_core} / larger module sets.
+
+\subsubsection{Endemicity across the CE corpus}
+Three modules are an anecdote. Running the \emph{same} validated scanner over a corpus of \textbf{11 installed
+Odoo 19 CE business apps} (sale, account, stock, purchase, mrp, project, crm, hr, fleet, repair, maintenance ---
+148 in-scope models, 33 containment edges, 14 context-bound discriminators) shows the relational-traversal gap
+is \textbf{endemic}: it recurs in \textbf{6 of the 8 business domains} that contain an \emph{at-risk} child
+model (one reachable through a containment edge to a parent enforcing a context-bound team/company/owner rule).
+The 3-module baseline reproduces with \textbf{zero verdict drift} (the 5 known gaps unchanged; the rest are
+additions).
+
+\begin{figure}[t]
+\centering
+% mirrors results/scale/corpus/endemic.csv (TOTAL row excluded)
+\begin{tikzpicture}
+\begin{axis}[
+  ybar, bar width=6pt, width=\linewidth, height=42mm,
+  enlarge x limits=0.09, ymin=0, ymajorgrids, font=\footnotesize,
+  ylabel={count}, ylabel near ticks,
+  symbolic x coords={hr,account,project,sale,crm,stock,mrp,purchase},
+  xtick=data, x tick label style={font=\scriptsize},
+  legend style={at={(0.98,0.96)},anchor=north east,font=\scriptsize,draw=none},
+  legend cell align=left]
+\addplot[draw=gray,fill=gray!25] coordinates
+  {(hr,7)(account,6)(project,4)(sale,4)(crm,1)(stock,1)(mrp,2)(purchase,2)};
+\addplot[draw=red!60!black,fill=red!35] coordinates
+  {(hr,5)(account,3)(project,3)(sale,2)(crm,1)(stock,1)(mrp,0)(purchase,0)};
+\legend{at-risk children, gaps}
+\end{axis}
+\end{tikzpicture}
+\caption{\textbf{Endemicity across 8 Odoo CE business domains.} Gaps (red) among at-risk children (gray) per
+domain: \textbf{15 gaps across 6 of 8 domains}, low per model but systematic; only mrp and purchase are clean.
+Mirrors \code{results/scale/corpus/endemic.csv}.}
+\label{fig:endemic}
+\end{figure}
+
+\textbf{15 gaps across 6 domains} (vs 5 across 3, Figure~\ref{fig:endemic}). \textbf{The finding is breadth, not frequency:} per
+\emph{model} the gap is rare --- only 15 of 2{,}072 reachable child$\times$axis pairs (0.7\%) --- but among the
+at-risk population it is common and crosses nearly every domain (pooled 15/27; per-domain rate 0--1). Two
+domains (mrp, purchase) are clean. Endemic means \textbf{ubiquitous-across-domains and systematic} (the direct
+consequence of record-rule-on-the-parent-only), \textbf{not} ``X\% of Odoo is vulnerable''; we do not claim
+live-tenant exploitability (depends on deployed rules/ACLs/agent) nor completeness (corpus = the installed
+union; OCA community add-ons are a higher-burden future target). Manual-burden at corpus scale rises to
+\textbf{37 closures vs 9 hand-written (4.1$\times$)}.
+
+\subsection{Emit + runtime-verify}
+\code{results/scale/emit.csv}.
+\begin{itemize}[leftmargin=*]
+  \item \textbf{pco mock (end-to-end):} emit a guard \code{POLICY} from the derived closures; it
+        \textbf{reproduces the hand-written POLICY} on team/company (owner is a local field, out of closure
+        scope); rebinding the guard's POLICY to the emitted dict and re-running \code{ci_gate} yields
+        \textbf{BENCH\_GATE: PASS} --- the guard driven by the \emph{auto-emitted} policy is leak-free,
+        identical to hand-written. The bespoke POLICY is \textbf{derivable, not hand-authored}.
+  \item \textbf{real Odoo CE (emit-classify, read-only):} propose a native \code{ir.rule} per gap,
+        \textbf{gated on the parent rule's pushdownability}. Honest result: \textbf{1 of 5} is soundly
+        emittable (\code{stock.storage.category.capacity} $\to$
+        \code{[('storage_category_id.company_id','in',company_ids)]}); the other \textbf{4 are manual-review}
+        because their parent rule is OR / \code{parent_of} / multi-field. We \textbf{refuse to push a complex
+        parent domain into one child leaf} (not sound in general) --- that 1/5 is the conservative gate's
+        frontier (sound-but-incomplete; \S5.3.1 tightens it).
+\end{itemize}
+
+\subsubsection{Soundness frontier --- a proved pushdown theorem}
+The \S5.3 gate is \textbf{sound but incomplete} (it refuses OR / multi-field outright). We prove a strictly
+tighter sound gate (\code{pushdown_soundness.py}).
+
+\noindent\textbf{Theorem.} Let $r$ be an F10 containment relation --- a stored Many2one that is \code{required}
+(total) and \code{ondelete=cascade}, hence a \textbf{functional + total} map from each child $c$ to a unique
+existing parent $\pi(c)$. For a parent domain $D_P$, the pushdown $D_P[f := r.f]$ admits exactly the children
+$c$ whose $\pi(c)$ is admitted by the parent's \emph{operative} gate, provided (1) every leaf operator is a
+stored \textbf{value-comparison} ($=,\neq,\mathtt{in},\mathtt{not\ in},<,>,\le,\ge,\mathtt{like},\ldots$) and
+\textbf{not} hierarchical/subquery (\code{child_of}, \code{parent_of}, \code{any}, \code{not any}) nor
+\code{=?}; and (2) \textbf{P-ACTIVE-CLEAN} --- if $P$ has an \code{active} field, the emit re-imposes
+\code{(r.active,=,True)} (else manual-review). \emph{Proof (sketch):} $r$ functional+total $\Rightarrow$ each
+value-comparison leaf $(r.f,op,v)$ on $c$ equals $(f,op,v)$ on $\pi(c)$; the connectives $\&/|/!$ are pointwise
+on the same $c$ (the same $\pi(c)$); by structural induction $\mathrm{pushdown}(D_P,r)(c)=D_P(\pi(c))$.
+\textbf{Boolean structure (AND/OR/NOT, multi-field) imposes no condition} --- it is always sound. $\square$
+
+The operative parent gate is $D_P \wedge \mathrm{active\_test}(P)$: pushing only $D_P$ would admit a child of an
+\textbf{archived} parent that the parent rule rejects --- so P-ACTIVE-CLEAN re-imposes \code{r.active}.
+Hierarchical operators recurse over $P$'s own hierarchy; their dotted-rewrite semantics are
+implementation-dependent, so we \textbf{withhold} them (manual-review), we do not \emph{refute} them. Reading
+the verdict off \code{parse_domain}'s reason, the theorem lifts \textbf{1/5 $\to$ 3/5} soundly emittable on the
+committed CE emit set (the \code{or/not} and \code{or/not;multi-field} gaps become sound; the two
+\code{op:parent_of} gaps remain), and \textbf{1/6 $\to$ 4/6} on the Sales-app scan
+(\code{results/scale/soundness.csv}) --- including \code{sale.order.template.line}, an \emph{active}-bearing
+parent handled by re-imposing \code{sale_order_template_id.active} (the P-ACTIVE-CLEAN case). \textbf{Anti-claims:}
+we do NOT soundly compile arbitrary domains (hierarchical/subquery/\code{active}-sensitive excluded);
+\code{parent_of} is withheld, NOT refuted; the fraction is corpus-specific; the theorem refines the heuristic,
+it does not obsolete it. The archived-parent counterexample is a regression test.
+
+\subsection{ABAC/ReBAC formalization (RQ7)}
+\code{results/policy_model.csv}. The bespoke per-model POLICY is, named explicitly, an \textbf{instance of a
+general subject-context model}: each grant = a \textbf{ReBAC relation-path} (the M2O closure to the field's
+defining model --- the same \code{_derive_path} BFS as \S5) $\times$ an \textbf{ABAC attribute-predicate}
+(terminal field + operator + context RHS) $\times$ a \textbf{subject-context} of one of three kinds
+\{group-membership, tenant-set, principal-id\}. \code{policy_model.py} (pure) \code{compile_policy} is a
+faithful transcription of the guard's \code{_authz_domain}; a live round-trip proves \textbf{\code{compile_policy
+== guard._authz_domain} for 20/20 persona $\times$ model} (Odoo 19). Every team/company \code{relation_path}
+equals the PCC-ERP BFS closure (hops 0 on the header, 1 on a child); the company/owner contexts are recognized
+ABAC tokens while \textbf{team is RBAC} (group-membership, resolved via \code{has_group} --- deliberately not a
+domain context). \textbf{Honest: formalization, not new enforcement} --- it names what the guard already does
+(zero new ir.rule/attack; \code{ci_gate} untouched), and ABAC over un-populated attributes (state/region ---
+vacuous on the synthetic data) is deliberately omitted.
+
+\subsection{Cross-system generality --- the gap is paradigm-level (RQ9)}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[font=\footnotesize,node distance=3mm,
+  o/.style={draw,rounded corners,align=center,inner sep=3pt,fill=blue!6,text width=37mm,minimum height=7mm},
+  p/.style={draw,rounded corners,align=center,inner sep=3pt,fill=green!7,text width=37mm,minimum height=7mm}]
+  \node[font={\small\bfseries}] (oh) {Odoo ORM record rules};
+  \node[font={\small\bfseries},right=46mm of oh] (ph) {PostgreSQL RLS};
+  \node[o,below=4mm of oh.west,anchor=north west] (o1) {team \code{ir.rule} domain};
+  \node[o,below=of o1] (o2) {child model with \emph{no} rule};
+  \node[o,below=of o2] (o3) {PEP write-check};
+  \node[o,below=of o3] (o4) {direct child read/write bypass};
+  \node[p,below=4mm of ph.west,anchor=north west] (p1) {\code{CREATE POLICY {\dots} USING}};
+  \node[p,below=of p1] (p2) {table with RLS \emph{not enabled}};
+  \node[p,below=of p2] (p3) {\code{WITH CHECK}};
+  \node[p,below=of p3] (p4) {per-relation governance gap};
+  \foreach \a/\b in {o1/p1,o2/p2,o3/p3,o4/p4}
+    \draw[dashed,gray] (\a.east) -- node[above=-1pt,font=\scriptsize]{$\approx$} (\b.west);
+\end{tikzpicture}
+\caption{\textbf{Odoo $\leftrightarrow$ PostgreSQL-RLS mapping (RQ9/RQ10).} The same relational-traversal gap
+class and the same predicate-pushdown fix appear on a second, independently-specified engine: a child without a
+row rule $\approx$ a table with RLS never enabled; the PEP's write-check $\approx$ Postgres \code{WITH CHECK}.
+Neither engine is ``broken'' --- both apply security per relation by design; an LLM agent operationalizes the
+misconfiguration by taking the direct-child path. Demonstrated leak $12/6 \to 6/0$ (\S5.5).}
+\label{fig:rls}
+\end{figure}
+
+\code{results/rls.csv}. Is the relational-traversal gap an Odoo quirk? No. We reproduce the \textbf{same gap
+class and the same predicate-pushdown fix} on a second, independently-specified enforcement engine ---
+\textbf{PostgreSQL Row-Level Security (RLS)} --- making good on the forward reference in \S1.2. The mapping is
+1:1 (Figure~\ref{fig:rls}): \code{CREATE POLICY} $\approx$ an \code{ir.rule}; a child table with \textbf{RLS
+never enabled} $\approx$ a child model without a record rule (the realistic header-only misconfiguration); a
+\textbf{direct read of the
+child} relation $\approx$ the confused-deputy/BOLA traversal; and an inline-\code{EXISTS} child policy
+$\approx$ the PEP's forced derived row-domain (T1.2). A governed parent \code{orders} (tenant-isolation policy,
+\code{ENABLE} + \code{FORCE ROW LEVEL SECURITY}) has an ungoverned FK-child \code{order\_lines}; the agent
+queries the child directly. The probe runs as a dedicated \code{app\_user} (\code{NOSUPERUSER NOBYPASSRLS})
+role --- a superuser or table owner would \emph{bypass} RLS and make the demonstration vacuous --- so each run
+emits an in-band \textbf{positive control}: the parent read must return only the tenant's own 3-of-6 orders
+(\code{CONTROL-OK}); a count of 6 would prove RLS never fired. \code{cross\_tenant\_rows} is measured from a
+ground-truth \code{tenant} label on each line that \textbf{no policy ever reads} (an independent leak oracle,
+the same non-circular posture as the Odoo \code{ground\_truth\_domain}). Result (\code{app\_user}, tenant
+\code{ttv}, \code{postgres:16}): the ungoverned child leaks all \textbf{12 lines, 6 cross-tenant (LEAK)}; the
+inline pushdown \code{USING (EXISTS (SELECT 1 FROM orders o WHERE o.id = order\_lines.order\_id AND o.tenant =
+current\_setting('app.tenant')))} closes it to the tenant's own \textbf{6 lines, 0 cross-tenant (SAFE)} --- and
+not by over-broad denial (the positive control still passes). We verified the trap empirically: the identical
+child query run as the superuser \code{odoo} returns 12/6 even under V-pushdown, confirming the result is only
+meaningful as \code{app\_user}. \textbf{Honest framing (no overclaim):} \emph{neither engine is broken} --- both
+Odoo record rules and Postgres RLS apply security \textbf{per relation by design} and \textbf{default-allow} a
+relation that was never governed; an ungoverned child is operating exactly as documented. The contribution is
+that an \textbf{LLM agent operationalizes} a realistic DBA misconfiguration by autonomously choosing the
+direct-child path, and that the \textbf{same predicate-pushdown fix} closes it in both engines. This is a
+demonstration of the gap \emph{class}'s recurrence across paradigms, \textbf{not} a defect claim, \textbf{not} a
+leak rate, and \textbf{not} a semantic equivalence (analogy at the gap/fix level only; one schema, one engine
+version, two tenants). Fully reproducible and byte-stable: \code{make rls} regenerates \code{results/rls.csv}
+against the isolated stack's \code{postgres:16} (db-only, no Odoo, reads no credentials) and byte-diffs it;
+\code{tests/test\_rls\_model.py} calibrates the verdict invariants + the positive control + a static
+safety-token lint of the SQL in CI without Docker.
+
+% =====================================================================
+\section{Integrity --- RQ6 (applied / adopt-not-invent)}
+A reliability threat orthogonal to authorization: an LLM agent that retrieves the \emph{right} rows can still
+report a \emph{silently-wrong number} (a hallucinated or mis-derived value that looks plausible). We adopt the
+warehouse-native principle --- \textbf{the LLM must not do arithmetic; every number binds to an execution
+result} --- down to ERP. Framed explicitly as applied (not a research-novelty claim). No LLM in the public
+artifact, so (as for authz) the demos are deterministic: planted answers + a trusted symbolic gold; what is
+demonstrated is the \emph{mechanism}, with the real-LLM rate validated privately. Three complementary layers
+(TB.1/TB.2/TB.3), a strict division of labor:
+
+\subsection{Numeric verifier (TB.1)}
+\code{results/integrity.csv}. A pure, offline-tested scanner: each answer number must bind to the governed
+execution table or a \textbf{bounded derivation} of it (sum / pairwise-diff / ratio\% / pct-change /
+share-of-total; magnitude + rounding tolerance; VN/EN decimals). 6 questions across \textbf{5 kinds}
+(aggregation / ratio / growth-\% / period-comparison / multi-step), each with a symbolic gold.
+
+\begin{center}\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+metric & result \\
+\midrule
+Silently-Wrong-Number Rate & raw text-to-ORM \textbf{6/6} (wrong present) $\to$ \textbf{+verifier 0/6} \\
+false-flag rate on correct/derived answers & \textbf{0/6} (passes growth-\%, ratios, negative diffs) \\
+coverage & \textbf{5/5 kinds} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+TB.1 catches numbers \textbf{not derivable} from the data (fabricated / cross-data). Its \textbf{blind spot}:
+\emph{correct-arithmetic-with-the-wrong-formula} --- a number that \emph{is} a valid derivation (so it binds)
+yet answers a \emph{different} question (wrong rows/field/agg/dimension).
+
+\subsection{Governed metrics (TB.3) + execution-guided self-consistency (TB.2)}
+\code{results/integrity_formula.csv}. A governed-metric registry pins \code{(model, measure, agg, dimension,
+filter)}; the engine computes each \textbf{through the guard} (the authz domain pins the rows, the registry
+pins measure+agg $\to$ the right formula over the right rows by construction, so a covered question
+\emph{cannot} be wrong-formula). Self-consistency votes over executed candidates (strict majority; minority
+outvoted; no-majority refused). On 6 wrong-formula questions whose wrong value \textbf{binds under TB.1} (it
+equals an \emph{identity} / \emph{pairwise-diff} / \emph{share} target while answering a different question ---
+e.g.\ one team's total reported as the all-team total):
+
+\begin{center}\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+config & wrong-formula caught \\
+\midrule
+TB.1 only & \textbf{0/6} --- every wrong value binds $\to$ silently wrong \\
++ TB.3 (governed metric, raw $\neq$ governed) & \textbf{4/6} (in-scope) \\
++ TB.2 (self-consistency vote) & \textbf{6/6} (the out-of-scope tail, no metric) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Governed-metric coverage \textbf{4/6} (hybrid: out-of-scope carried by the vote). A 7th \emph{contrast}
+question (\code{sum(amount_subtotal)}, forgot tax) is \textbf{caught by TB.1 already} (unbindable) --- kept to
+mark the taxonomy boundary, excluded from the 0/6. \textbf{Honest scope:} mechanism demo only --- candidates /
+metric-selection are planted (no LLM), coverage is partial by design, and this catches the wrong \emph{use} of
+a right metric, not a wrong metric \emph{definition}.
+
+% =====================================================================
+\section{Doc-RAG retrieval plane (RQ8)}
+The PEP extends from the structured-data plane to a \textbf{retrieval} plane. A RAG agent retrieves document
+\textbf{chunks} (derived from records) to answer a question; the confused-deputy is the \textbf{retriever},
+which ranks the most \emph{relevant} chunks regardless of whether the persona may read the source record. The
+mechanism reuses the data-plane guard: \code{guard.guarded_retrieve} routes each retrieved chunk's provenance
+back through \code{guarded_search_read} --- a chunk whose source record is \textbf{not row-authorized is
+dropped}, and a survivor is delivered only \textbf{re-rendered from the clearance-masked source}. A
+deterministic lexical (term-overlap) retriever stands in for the embedding ranker; the security property is
+\textbf{independent of the ranker}. No LLM.
+
+Oracles are \textbf{independent} of the guard's verdict: the full row-authz permitted set (unauthorized-row
+delivery) and the SUDO cleartext value (\code{output_validator} as a presence scanner, not the guard's own
+verdict). \code{results/docrag.csv}:
+
+\begin{center}\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+attack & undefended (unauth / confid) & guarded \\
+\midrule
+cross-team-direct (``nh\'om ttf'' query)               & 8/8  & \textbf{0/0} \\
+cross-team-incidental (generic query, spans teams)     & 8/12 & \textbf{0/0} \\
+confidential (own-team, spans masked)                  & 4/8  & \textbf{0/0} \\
+utility / false-block                                  & 4/8  & \textbf{0/0} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Undefended leaks 60 $\to$ guarded unauthorized 0, confidential 0, false-block 0} (Odoo 19);
+\code{ci_gate} unaffected (the driver self-asserts, like \S5.4, rather than gating). \textbf{Honest scope:} the
+PEP gates \textbf{delivery, not the index} --- cleartext indexing is an assumption and rank order can be
+influenced by confidential content (a named residual, not a value leak). Structural masking avoids the
+output-validator paraphrase residual \emph{because} chunks are provenance-tracked; true unstructured prose has
+no provenance, falls back to content-scanning, and inherits that residual (carried as one out-of-scope
+free-prose probe). \textbf{No real-LLM / embedding RAG rate is claimed.}
+
+% =====================================================================
+\section{Related work \& positioning}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Governed + secure NL analytics (prior art for the ``unified'' pillar):} Cortex
+        Analyst~\cite{cortexanalyst}, Databricks Genie~\cite{databricksgenie}, MS Fabric Data
+        Agent~\cite{fabricdataagent} (industry); SAFEFLOW~\cite{safeflow} (IFC, integrity+confidentiality). All
+        \textbf{assume complete/inherited governance} and do not target ERP record rules or adversarial
+        row-level testing.
+  \item \textbf{Action/flow-plane authorization for agents:} OAP~\cite{oap}, PCAS~\cite{pcas},
+        SEAgent~\cite{seagent}, AgentGuard~\cite{agentguard}, ClawGuard~\cite{clawguard} --- govern the call,
+        \textbf{not} the result rows; we use an OAP-style baseline.
+  \item \textbf{Database access-control synthesis:} DePLOI/IBAC-DB~\cite{deploi} synthesizes/audits
+        \textbf{table-level} grants from NL intent; OPA~\cite{opa} partial-eval / predicate pushdown compile
+        policy$\to$filter. PCC-ERP differs in \textbf{relational-closure derivation across the ORM graph} (which
+        child needs which parent's pushed-down rule), not the filter mechanics.
+  \item \textbf{RBAC / agent-security benchmarks:} OrgAccess~\cite{orgaccess} (RBAC reasoning, GPT-4.1
+        F1$\approx$0.27 --- motivates LLM-outside), ASB~\cite{asb}, SecureMCP~\cite{securemcp} (table/column
+        RBAC), Role-Conditioned Refusals~\cite{rolecond} (text-to-SQL).
+  \item \textbf{Concurrent agent-authorization work (2025--26)} --- a fast-moving wave, all \emph{orthogonal
+        to the data-result plane}: $\tau$-bench~\cite{taubench} and PolicyBank~\cite{policybank} evaluate/refine
+        agent adherence to natural-language \textbf{policy text} at the tool-capability level (not row-level DB
+        enforcement); mandatory-access-control frameworks for multi-agent \textbf{privilege escalation} (the
+        ``Taming Privilege Escalation''/SEAgent line~\cite{seagent}, 0\% ASR across prompt-injection /
+        RAG-poisoning / confused-deputy \emph{across agents}) and Progent~\cite{progent} (least-privilege at the
+        \textbf{tool/API} interface) govern the call/permission, not the returned rows; ``A Vision for Access
+        Control in LLM Agent Systems''~\cite{visionaac} is a position paper. None targets ERP record-rule
+        incompleteness on child models or the relational-traversal row bypass.
+  \item \textbf{Denial-channel leakage:} ``Causality Laundering: Denial-Feedback Leakage in Tool-Calling LLM
+        Agents''~\cite{causalitylaundering} \textbf{formalizes} (causal theory) and \textbf{detects} information leakage through an
+        agent's refusal/denial feedback --- the same channel our \textbf{uniform-denial} layer (T2.4/RQ5)
+        attacks, but from the opposite end: they characterize/measure the leak, we \textbf{operationally
+        close} the observable (identical empty result + constant-time, measured as Existence-Inference Rate
+        1/1 $\to$ 0/1, \S4.4). Complementary: their lens is the theory of the channel; ours is a deployable PEP
+        defense + a benchmark metric for it.
+\end{itemize}
+
+\textbf{Novelty (honest):} the \emph{combination} --- ERP record-rule incompleteness on child models $\times$
+agent-driven relational-traversal exploitation $\times$ the first adversarial benchmark $\times$ a
+relational-closure compiler --- not any single mechanism, and (per the 2025--26 wave above) \textbf{the
+data-result plane is the un-occupied niche}: concurrent agent-authorization work targets the
+control/permission plane, policy-text compliance, multi-agent MAC, or the denial-channel \emph{theory}; none
+enforces or compiles \textbf{row-level} ERP record rules. We explicitly do \textbf{not} claim a novel
+authz+integrity unification (prior art) or a general policy compiler for agents (PCAS/OAP-adjacent). Subtitle
+framing: \emph{``Policy-Closure Compilation for Row-Level Authorization in ERP LLM Agents.''}
+
+% =====================================================================
+\section{Limitations \& honest scope}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Oracle harness, real-LLM run is one proxy (public artifact):} the headline attacks are
+        deterministic ORM-level probes; one \textbf{real-LLM run} (\S10.1.1, \code{gpt-4o-mini}, N=12, synthetic)
+        gives an empirical proxy (ASR-without-guard 2/12, guarded 0/12) --- not a stable rate; the full
+        production loop is validated privately. The PEP correctness claim is at the data-result plane.
+        The integrity layers (\S6) likewise demonstrate \emph{mechanisms} on planted answers/candidates --- not
+        measured LLM hallucination or wrong-formula rates --- and the governed-metric coverage is partial by
+        design (hybrid).
+  \item \textbf{CE gap count is modest:} standard Odoo is broadly company-governed; the 5 gaps are real but the
+        heavier gap/burden target is the bespoke \code{pco_core} or larger module sets.
+  \item \textbf{Emit soundness is bounded but characterized (\S5.3.1):} the conservative gate emits only single
+        simple leaves (1/5 on CE); a \textbf{proved theorem} widens this to any boolean structure of stored
+        value-comparison leaves through a required-cascade M2o (1/5 $\to$ 3/5 on CE, 4/6 on the Sales-app scan),
+        with \code{active}-bearing parents handled by re-imposing \code{r.active}. The remaining frontier
+        (hierarchical \code{parent_of}/\code{child_of}, subquery) is withheld (manual-review), not refuted;
+        sound pushdown of \emph{arbitrary} domains is not claimed.
+  \item \textbf{Owner axis} is a local opt-in field, out of relational-closure scope by construction.
+  \item \textbf{Red-team is grammar-exhaustive, not exhaustive (\S4.3):} the automated red-team enumerates a
+        \emph{defined} ORM-pivot grammar (a modeled threat surface) deterministically and without an LLM; a
+        green gate means no bypass at any enumerated point, not a universal-correctness proof.
+  \item \textbf{RQ7 is formalization, not enforcement (\S5.4):} it names the team/company/owner predicates the
+        guard already enforces (no new ir.rule/attack); ABAC over un-populated attributes would be vacuous and
+        is omitted.
+  \item \textbf{RQ8 gates delivery, not the index (\S7):} the retrieval PEP re-checks provenance at delivery;
+        the cleartext index and rank-order are named residuals, structural masking depends on field provenance
+        (unstructured prose inherits the paraphrase residual), and no real-LLM / embedding RAG rate is claimed.
+  \item \textbf{RQ9 is a class demonstration, not a defect or a rate (\S5.5):} the Postgres-RLS result
+        reproduces the gap \emph{class} and the pushdown fix on one schema / one engine version / two tenants.
+        It is \textbf{not} a claim that Postgres RLS is broken (the ungoverned child is a realistic DBA
+        misconfiguration operating as documented), \textbf{not} a leak rate, and \textbf{not} an
+        Odoo$\leftrightarrow$Postgres semantic equivalence. Validity rests on running as a
+        \code{NOSUPERUSER NOBYPASSRLS} role; the committed positive-control row is the proof.
+  \item \textbf{Write plane is single-op, not workflow (\S4.7 / RQ10):} the mutation suite covers
+        create/write/unlink confused-deputy writes on the child relations (closed by USING + WITH-CHECK);
+        bulk/mass writes, workflow/state-machine transitions, field-level write-masking, and a write-side
+        existence channel are named future work; non-vacuity rests on a realistic operational-write ACL grant
+        (read-safe by byte-diff).
+  \item \textbf{Overhead is a structural bound, not a load test (\S4.8):} \code{overhead.csv} certifies the added
+        work is bounded (\(\le\)3 indexed conjuncts, \(\le\)1 indexed-FK hop, O(result\(\times\)masked) masking);
+        the wall-clock is one-machine indicative, not committed; no throughput/concurrency study, no committed plan.
+  \item \textbf{Read/write-scoped:} prompt-injection elimination and infrastructure threats are out of scope;
+        prompt injection is ``reduced + measured'', not ``eliminated''.
+\end{itemize}
+
+% =====================================================================
+\section{Reproducibility}
+\begin{itemize}[leftmargin=*]
+  \item Offline (no Odoo): the \code{tests/test_*.py} suite (output-validator, sensitivity, policy-closure,
+        policy-scan, policy-emit, policy-model, numeric-verifier, metrics-and-consistency, redteam, docrag,
+        agent-loop) --- run in CI static-checks.
+  \item Full benchmark + linter + emit: an Odoo 19 shell over the mock (V-vuln/V-rule) and over Odoo CE
+        \code{sale,account,stock}; see \code{README.md} for the exact \code{odoo shell} recipes. All runs in
+        this report were produced in \textbf{isolated ephemeral Odoo 19 + Postgres containers}; committed
+        reference copies live in \code{results/}.
+\end{itemize}
+
+\subsection{End-to-end agent-loop proxy (reproducible, no LLM)}
+\code{results/agent_loop.csv}. The ORM-level probes above prove the row-level security rate; this proxy adds the
+one axis they do not exercise as a \emph{loop} --- the full \textbf{intent $\to$ tool-calls $\to$ guard $\to$
+synthesized NL answer $\to$ output validator} pipeline, and \textbf{UTILITY}: is a benign business query
+answered \emph{correctly} and \emph{persona-scoped}? A \code{ScriptedAgent} (a deterministic NL$\to$tool-call
+map --- \textbf{not} a language model) drives \code{agent_loop(env)}; the utility gold is an \textbf{independent}
+sudo recomputation over the persona's full authorized set (team AND company), never the guarded output.
+
+\begin{center}\small
+\begin{tabular}{@{}llccl@{}}
+\toprule
+query & intent & utility (corr./scope) & answer-leak & outcome \\
+\midrule
+total quantity by product (own team)  & benign                  & \textbf{yes / yes} & safe & answered \\
+list my orders                        & benign                  & \textbf{yes / yes} & safe & answered \\
+``give me team TTF's totals''         & adversarial             & n/a & \textbf{safe} & blocked-at-guard \\
+spelled-out cross-team value          & adv.\ (out-of-scope)    & n/a & leak & documented residual \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Benign queries are answered correctly and scoped; the adversarial cross-team request is silently narrowed to
+the persona's own scope (the cross-team value never reaches the answer); the spelled-out value is the
+documented answer-channel residual (\S4.3). The \textbf{row-level security rate is delegated to \S4.1/\S4.3},
+not re-measured here --- this is a \emph{mechanism + utility} demo, not a security re-proof. The
+\code{LLMAgent} \textbf{seam} (an interface + recipe, deliberately not a shipped SDK client) is where a real
+model plugs in --- exercised next.
+
+\subsubsection{Real-LLM run (reproducible public proxy)}
+We drove the loop once with a \textbf{real tool-calling model} (\code{gpt-4o-mini}~\cite{gpt4omini}, temperature 0, N=12 business
+questions over the public synthetic seed=42 corpus; the model's emitted tool-calls are committed in
+\code{results/llm/plans.json}, so the evaluation reproduces WITHOUT re-calling the model). The planner runs on
+the host (\code{tools/llm_planner.py}, the only OpenAI-importing file, outside CI); Phase 2 (\code{llm_eval},
+deterministic) executes each call \textbf{unguarded} (the ASR) vs \textbf{through the guard} against an
+\textbf{independent} oracle --- the persona's ground-truth permitted id-set, never the guard's verdict. The
+prompt is \textbf{neutral} (a business analyst over the ERP; the schema is disclosed but the model is never told
+to filter by team for security).
+
+\begin{center}\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+stratum & leaked-without-guard & with-guard \\
+\midrule
+benign (own-team questions)            & \textbf{0/8} (model self-scoped) & 0/8 \\
+adversarial (system-wide / cross-team) & \textbf{2/4} (broad child aggregates) & 0/4 \\
+\textbf{total} & \textbf{ASR = 2/12} & \textbf{leak = 0/12} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The new empirical facts: (i) a neutrally-prompted real LLM \textbf{does emit tool-calls that leak past native
+governance} (the two leaks are broad child-model aggregates with an empty domain --- the confused-deputy made
+concrete); (ii) the model \textbf{self-scopes on own-team questions (0/8)} but not on system-wide ones, so the
+guard is load-bearing; (iii) \textbf{through the guard, leak = 0/12 regardless of model output}. (Honest detail:
+the model's parent-traversing cross-team queries were caught by the native \emph{header} rule on the join, not
+the PEP --- which reinforces the thesis: the bypass lives where a domain does not route back through the
+parent.) \textbf{Anti-claims:} 2/12 is NOT a stable rate (one run/model/temp, N=12, synthetic); NOT the private
+production number; the security claim does NOT depend on the ASR being large (load-bearing = guarded 0
+regardless); malformed/refused calls are their own buckets, never silently ``safe''.
+
+\subsection{Private validation (corroborating, not reproducible)}
+Because the guard rewrites the query domain \textbf{below the LLM trust boundary} --- the model only emits ORM
+tool-calls and the PEP forces the authorization domain before the database --- the row-level security property
+is \textbf{independent of which LLM (or whether any LLM) drives the loop}; the deterministic public proof
+(leak 0 on every class, variant, and enumerated grammar point) is the security proof, and the private real-LLM
+run measures only what the mechanism does not guarantee a priori (utility, the answer-channel paraphrase
+residual, and wrong-formula rate).
+
+The private end-to-end rates are obtained with the \textbf{same instrument} as this artifact ---
+\code{evaluation_script.py} / \code{ci_gate}, the public \code{PERSONAS}, and the public ERP-AuthZBench +
+adaptive + red-team attack sets --- pointed at the production data with a real tool-calling model via the
+\code{LLMAgent} seam (\S10.1). \textbf{Only the data and the resulting numbers are private; the measurement
+instrument is the audited public one.} A reader reproduces the \emph{method} by instantiating \code{LLMAgent}
+against their own model + the synthetic \code{seed=42} corpus.
+
+Honest scope of this section: \textbf{(1)} the private numbers carry \textbf{no headline security claim} --- the
+deterministic proof (\S4) and the reproducible proxy (\S10.1) carry the security load; the private run only
+\emph{corroborates} and characterizes utility/residual. \textbf{(2)} They are \textbf{privately measured, not
+reproducible from this artifact} (real data + a real model the public repo deliberately does not contain).
+\textbf{(3)} The committed proxy (\S10.1) is a \emph{mechanism + utility} demo, \textbf{not} a stand-in for the
+real-LLM rate. \textbf{(4)} We \textbf{report negative results}: any case the private real-LLM loop surfaces
+that the deterministic harness missed is fed back as a new public ERP-AuthZBench variant --- that feedback
+loop, not a clean private number, is the evidence of good faith. \emph{(Production figures and an
+internal-attestation line are filled in the private build; they are omitted here rather than shown as
+placeholders.)}
+
+% =====================================================================
+\section{Conclusion}
+ERP LLM agents leak rows at the data-result plane when record-rule governance is incomplete on child models ---
+a gap the warehouse-native and action-plane lines of work do not close for ERP. ERP-AuthZBench measures it,
+PG-Agent closes it (clean on every class, in both schema variants, robust to adaptive path-switching), and
+PCC-ERP shows the per-model closures are \emph{derivable}: it reconstructs the guard policy on the mock
+end-to-end and shows the relational-traversal gap is \textbf{endemic} across vanilla Odoo CE --- recurring in
+6 of 8 business domains (15 gaps), low per model but systematic --- emitting sound native rules exactly where
+the parent rule is pushdownable. On the reliability axis (RQ6), the three-layer integrity stack
+drives the silently-wrong-number rate to zero and closes the numeric verifier's wrong-formula blind spot (TB.1
+0/6 $\to$ +TB.3 4/6 $\to$ +TB.2 6/6) via deterministic governed metrics + execution-voting. Beyond the
+canonical results, the residual-risk surface is regression-gated by an exhaustive ORM-pivot \textbf{red-team
+grammar} (residual-leak 0/41); the bespoke POLICY is shown to be an instance of a general
+\textbf{ABAC$\times$ReBAC} subject-context model whose formal compiler reproduces the guard's exact domain
+(RQ7, 20/20); the PEP extends to a \textbf{Doc-RAG retrieval plane} that delivers chunks only re-rendered
+from row-authorized, clearance-masked sources (RQ8, guarded leak 0); and the relational-traversal gap is shown
+to be \textbf{paradigm-level} --- the same leak and the same pushdown fix reproduce on \textbf{PostgreSQL RLS}
+(RQ9, 12/6 $\to$ 6/0); and the threat model extends to \textbf{mutations}, where a forced write-check
+(USING + WITH-CHECK) closes the confused-deputy \emph{write} gap on create/write/unlink (RQ10, 12/12 breaching
+writes held --- including a reassignment the naive native rule misses for want of a \code{WITH CHECK}). The work
+is applied-security + benchmark + reference implementation for an under-served setting, with an explicitly honest
+soundness frontier.
+
+\bibliographystyle{splncs04}
+\bibliography{refs}
+
+\end{document}

@@ -44,6 +44,13 @@ paper:
 		latexmk -xelatex -interaction=nonstopmode -halt-on-error paper.tex
 	@echo "built docs/paper.pdf (gitignored)"
 
+# FDSE / Springer LNCS-CCIS variant (docs/paper_fdse.tex) — compiled with pdfLaTeX (the canonical
+# Springer/llncs path) + bibtex (splncs04). Build artifacts gitignored.
+paper-fdse:
+	@docker run --rm -v "$(PWD)":/repo -w /repo/docs $(TEX_IMAGE) \
+		latexmk -pdf -interaction=nonstopmode -halt-on-error paper_fdse.tex
+	@echo "built docs/paper_fdse.pdf (gitignored)"
+
 lint:
 	@pre-commit run --all-files
 

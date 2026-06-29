@@ -60,6 +60,8 @@ docs/*.fdb_latexmk
 docs/*.toc
 docs/*.synctex.gz
 docs/*.xdv
+docs/*.bbl
+docs/*.blg
 
 # ── OS / editor ──────────────────────────────────────────────────────────────
 .DS_Store

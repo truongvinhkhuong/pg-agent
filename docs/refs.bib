@@ -1,0 +1,168 @@
+% ---------------------------------------------------------------------------
+% refs.bib — bibliography for paper_fdse.tex (FDSE / Springer splncs04 style).
+% DRAFT, researched 2026-06-29. arXiv IDs / titles / years were web-verified.
+%
+% AUTHOR LISTS marked as {{N. N.}} were NOT in the search snippets and MUST be
+% completed/confirmed before submission. Keys needing author confirmation:
+%   orgaccess, rolecond, policybank, progent, pcas, agentguard, clawguard,
+%   safeflow, deploi, securemcp  (and verify the full author lists of seagent, visionaac).
+% NOT RESOLVED in the prose (now handled): "AgentBound" had no standalone citation
+%   (dropped); "Agent-GrantBox" not found -> replaced by Progent (verified) which
+%   matches the same "least-privilege at the tool/API interface" description.
+% Industry products / standards / model cards are misc-type entries with URLs.
+% (BibTeX has no inline percent-comments inside entries — keep all notes out here.)
+% ---------------------------------------------------------------------------
+
+% ===== Benchmarks (agents / access control) =====
+@article{taubench,
+  title  = {{$\tau$-bench}: A Benchmark for Tool-Agent-User Interaction in Real-World Domains},
+  author = {Yao, Shunyu and Shinn, Noah and Razavi, Pedram and Narasimhan, Karthik},
+  journal= {arXiv preprint arXiv:2406.12045},
+  year   = {2024}
+}
+@inproceedings{asb,
+  title    = {Agent Security Bench {(ASB)}: Formalizing and Benchmarking Attacks and Defenses in {LLM}-based Agents},
+  author   = {Zhang, Hanrong and Huang, Jingyuan and Mei, Kai and Yao, Yifei and Wang, Zhenting and Zhan, Chenlu and Wang, Hongwei and Zhang, Yongfeng},
+  booktitle= {International Conference on Learning Representations (ICLR)},
+  year     = {2025}
+}
+@article{orgaccess,
+  title  = {{OrgAccess}: A Benchmark for Role-Based Access Control in Organization Scale {LLMs}},
+  author = {{N. N.}},
+  journal= {arXiv preprint arXiv:2505.19165},
+  year   = {2025}
+}
+@article{rolecond,
+  title  = {Role-Conditioned Refusals: Evaluating Access Control Reasoning in Large Language Models},
+  author = {{N. N.}},
+  journal= {arXiv preprint arXiv:2510.07642},
+  year   = {2025}
+}
+@article{policybank,
+  title  = {{PolicyBank}: Evolving Policy Understanding for {LLM} Agents},
+  author = {{N. N.}},
+  journal= {arXiv preprint arXiv:2604.15505},
+  year   = {2026}
+}
+
+% ===== Agent authorization / privilege control (control/permission plane) =====
+@article{progent,
+  title  = {{Progent}: Programmable Privilege Control for {LLM} Agents},
+  author = {{N. N.}},
+  journal= {arXiv preprint arXiv:2504.11703},
+  year   = {2025}
+}
+@article{seagent,
+  title  = {Taming Various Privilege Escalation in {LLM}-Based Agent Systems: A Mandatory Access Control Framework},
+  author = {Ji, Zimo and others},
+  journal= {arXiv preprint arXiv:2601.11893},
+  year   = {2026}
+}
+@article{pcas,
+  title  = {Policy Compiler for Secure Agentic Systems},
+  author = {{N. N.}},
+  journal= {arXiv preprint arXiv:2602.16708},
+  year   = {2026}
+}
+@article{agentguard,
+  title  = {{AgentGuard}: An Attribute-Based Access Control Framework for Tool-Use {LLM}-Based Agents},
+  author = {{N. N.}},
+  journal= {arXiv preprint arXiv:2605.28071},
+  year   = {2026}
+}
+@article{clawguard,
+  title  = {{ClawGuard}: A Runtime Security Framework for Tool-Augmented {LLM} Agents Against Indirect Prompt Injection},
+  author = {{N. N.}},
+  journal= {arXiv preprint arXiv:2604.11790},
+  year   = {2026}
+}
+
+% ===== Information-flow / denial-channel =====
+@article{safeflow,
+  title  = {{SAFEFLOW}: A Principled Protocol for Trustworthy and Transactional Autonomous Agent Systems},
+  author = {{N. N.}},
+  journal= {arXiv preprint arXiv:2506.07564},
+  year   = {2025}
+}
+@article{causalitylaundering,
+  title  = {Causality Laundering: Denial-Feedback Leakage in Tool-Calling {LLM} Agents},
+  author = {Chinaei, Mohammad Hossein},
+  journal= {arXiv preprint arXiv:2604.04035},
+  year   = {2026}
+}
+
+% ===== Database access-control synthesis =====
+@article{deploi,
+  title  = {{DePLOI}: Applying {NL2SQL} to Synthesize and Audit Database Access Control},
+  author = {{N. N.}},
+  journal= {arXiv preprint arXiv:2402.07332},
+  year   = {2024}
+}
+@article{securemcp,
+  title  = {{SecureMCP}: A Policy-Enforced {LLM} Data Access Framework for {AIoT} Systems via Model Context Protocol},
+  author = {{N. N.}},
+  journal= {arXiv preprint arXiv:2605.05260},
+  year   = {2026}
+}
+
+% ===== Position paper =====
+@inproceedings{visionaac,
+  title    = {A Vision for Access Control in {LLM}-based Agent Systems},
+  author   = {Li, Xinfeng and others},
+  booktitle= {Engineering of Complex Computer Systems (ICECCS)},
+  year     = {2025}
+}
+
+% ===== Industry governed-NL-analytics platforms =====
+@misc{cortexanalyst,
+  title        = {Cortex Analyst},
+  author       = {{Snowflake}},
+  howpublished = {\url{https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-analyst}},
+  year         = {2024}
+}
+@misc{databricksgenie,
+  title        = {{AI/BI} Genie},
+  author       = {{Databricks}},
+  howpublished = {\url{https://docs.databricks.com/aws/en/genie/}},
+  year         = {2024}
+}
+@misc{fabricdataagent,
+  title        = {Microsoft Fabric Data Agent},
+  author       = {{Microsoft}},
+  howpublished = {\url{https://learn.microsoft.com/en-us/fabric/data-science/concept-data-agent}},
+  year         = {2024}
+}
+
+% ===== Standards / tooling =====
+@misc{opa,
+  title        = {Open Policy Agent {(OPA)}},
+  author       = {{Open Policy Agent (CNCF)}},
+  howpublished = {\url{https://www.openpolicyagent.org/}},
+  year         = {2023}
+}
+@misc{owaspbola,
+  title        = {{API1:2023} Broken Object Level Authorization},
+  author       = {{OWASP}},
+  howpublished = {\url{https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/}},
+  year         = {2023}
+}
+@misc{oap,
+  title        = {Operator Agent Protocol {(OAP)}},
+  author       = {{Aport}},
+  howpublished = {\url{https://aport.io/}},
+  year         = {2025}
+}
+
+% ===== Model cards =====
+@misc{gpt41,
+  title        = {{GPT-4.1}},
+  author       = {{OpenAI}},
+  howpublished = {\url{https://openai.com/index/gpt-4-1/}},
+  year         = {2025}
+}
+@misc{gpt4omini,
+  title        = {{GPT-4o mini}},
+  author       = {{OpenAI}},
+  howpublished = {\url{https://openai.com/index/gpt-4o-mini-advancing-cost-efficient-intelligence/}},
+  year         = {2024}
+}
