@@ -16,6 +16,24 @@ It runs **end-to-end on the mock + synthetic data with no access to any private 
 results are reproducible by reviewers. The same `pg_agent_guard` is separately validated against
 the real private `pco_core` inside the company monorepo.
 
+## Citation & license
+
+Licensed under the [MIT License](LICENSE). If you use this artifact, please cite it via
+**[`CITATION.cff`](CITATION.cff)** (the "Cite this repository" button on GitHub).
+
+For a permanent, citable, immutable archive it is published on **Zenodo** with a **DOI**:
+
+**DOI:** *pending — assigned automatically on the first Zenodo release (steps below).*
+<!-- After the first release, replace XXXXXXX with the concept DOI and uncomment:
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
+> Truong Vinh Khuong. *PG-Agent & ERP-AuthZBench: Authorization-Preserving LLM Agents over ERP, with a
+> Policy-Closure Compiler.* Zenodo, 2026. https://doi.org/10.5281/zenodo.XXXXXXX
+-->
+
+To mint the DOI: at [zenodo.org](https://zenodo.org) **Log in with GitHub → toggle this repo on**, then publish a
+GitHub **Release** (e.g. `v1.0.0`) — Zenodo archives the tagged snapshot (driven by [`.zenodo.json`](.zenodo.json))
+and assigns the DOI automatically. See [REPRODUCE.md](REPRODUCE.md#7-archival-and-citation-zenodo).
+
 ## Architecture principle (read first)
 
 > **The public repo NEVER references the private one. Only the private repo references the public one.**

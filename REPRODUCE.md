@@ -4,7 +4,7 @@ A permission-aware PEP guard for ERP LLM agents + the ERP-AuthZBench benchmark +
 policy-closure compiler. **Public, synthetic-only, no private code, no API key needed for the core path.**
 
 ## Badges targeted
-**Available** (public repo, MIT-style use) · **Functional** (`make test`) · **Reproduced** (`make reproduce`).
+**Available** (public repo, [MIT](LICENSE)-licensed, Zenodo DOI — §7) · **Functional** (`make test`) · **Reproduced** (`make reproduce`).
 
 ## Prerequisites
 - **Docker 24+** with `docker compose` v2. ~4 GB RAM, ~2 vCPU.
@@ -119,3 +119,19 @@ only `pgagent-ae_*`. No `.env`/credentials are read by the core path.
   predicate pushdown. The probe runs as a `NOSUPERUSER NOBYPASSRLS` role (a superuser/owner would bypass RLS) —
   the committed `parent-control` rows are the in-band proof that RLS actually fired. One schema, `postgres:16`,
   two tenants; reads no `.env`/credentials.
+
+## 7. Archival and citation (Zenodo)
+
+The "Artifacts Available" badge wants a **permanent, immutable** archive — a GitHub URL does not count, a Zenodo
+DOI does. One-time setup (free):
+
+1. At [zenodo.org](https://zenodo.org), **Log in with GitHub** and authorize.
+2. Account → **GitHub** → toggle the **`pg-agent`** repository **on**. *(Must be on before the release.)*
+3. On GitHub, publish a **Release** with a tag (e.g. `v1.0.0`). Zenodo's webhook archives the tagged source
+   tree — driven by [`.zenodo.json`](.zenodo.json) / [`CITATION.cff`](CITATION.cff) — and mints a **DOI**
+   (a *concept* DOI for all versions + a *version* DOI per release; cite the concept DOI).
+4. Paste the concept DOI into the README badge + `CITATION.cff` `identifiers`.
+
+The archived snapshot is the **git tree at the tag** — `.env` (gitignored, never committed) is **not** included.
+Because the archive is immutable, only tag a release that is green end-to-end (`make test` + `make reproduce-all`
++ `make paper`). Rotating the local `OPENAI_API_KEY` is a separate, unrelated good-hygiene step.

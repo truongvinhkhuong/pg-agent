@@ -1,0 +1,27 @@
+{
+  "title": "PG-Agent & ERP-AuthZBench: Authorization-Preserving LLM Agents over ERP, with a Policy-Closure Compiler",
+  "description": "A model-agnostic, data-result-plane Policy Enforcement Point (PEP) for ERP LLM agents on Odoo; the ERP-AuthZBench adversarial benchmark for row-level authorization (read + write planes, cross-engine RLS); and PCC-ERP, a policy-closure compiler that derives, emits, and runtime-verifies per-model row closures from the ORM relation graph. Ships a one-command, byte-diff reproducible artifact-evaluation harness. No real data and no private code: runs end-to-end on a synthetic mock.",
+  "upload_type": "software",
+  "license": "MIT",
+  "creators": [
+    { "name": "Truong, Vinh Khuong" }
+  ],
+  "keywords": [
+    "LLM agents",
+    "ERP security",
+    "row-level authorization",
+    "policy enforcement point",
+    "confused deputy",
+    "relational-traversal",
+    "Odoo",
+    "PostgreSQL RLS",
+    "policy-closure compiler"
+  ],
+  "related_identifiers": [
+    {
+      "relation": "isSupplementTo",
+      "identifier": "https://github.com/truongvinhkhuong/pg-agent",
+      "scheme": "url"
+    }
+  ]
+}

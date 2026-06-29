@@ -1,0 +1,34 @@
+# Citation metadata (https://citation-file-format.github.io/).
+# GitHub renders a "Cite this repository" button from this file; Zenodo reads it too.
+# After the first Zenodo release, paste the concept DOI into `identifiers` and `doi` below.
+cff-version: 1.2.0
+message: "If you use this artifact, please cite it as below."
+title: >-
+  PG-Agent & ERP-AuthZBench: Authorization-Preserving LLM Agents over ERP,
+  with a Policy-Closure Compiler
+abstract: >-
+  A model-agnostic, data-result-plane Policy Enforcement Point (PEP) for ERP LLM agents on Odoo, the
+  ERP-AuthZBench adversarial benchmark for row-level authorization, and PCC-ERP, a policy-closure compiler that
+  derives, emits, and runtime-verifies per-model row closures from the ORM relation graph. Includes a one-command,
+  byte-diff reproducible artifact-evaluation harness.
+type: software
+authors:
+  - family-names: Truong
+    given-names: Vinh Khuong
+repository-code: "https://github.com/truongvinhkhuong/pg-agent"
+license: MIT
+version: "1.0.0"
+# date-released: update to the actual Zenodo release date, e.g. 2026-07-01
+keywords:
+  - LLM agents
+  - ERP security
+  - row-level authorization
+  - policy enforcement point
+  - confused deputy
+  - relational-traversal
+  - Odoo
+  - policy-closure compiler
+# identifiers:
+#   - type: doi
+#     value: 10.5281/zenodo.XXXXXXX   # concept DOI from Zenodo (after first release)
+#     description: Concept DOI (all versions)
