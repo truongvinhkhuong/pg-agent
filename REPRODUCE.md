@@ -59,7 +59,7 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 | 6.1 / 6.2 | integrity (RQ6) | `integrity(env)` ; `integrity_formula(env)` | `results/integrity*.csv` | reproduce-all |
 | 7 | Doc-RAG plane (RQ8) | `docrag(env)` | `results/docrag.csv` | reproduce-all |
 | 10.1 | agent-loop proxy (no LLM) | `agent_loop(env)` | `results/agent_loop.csv` | reproduce-all |
-| 10.1.1 | real-LLM run | `tools/llm_planner.py` (key, **not reproducible**) ; `llm_eval(env)` (replay) | `results/llm/eval.csv` | **opt-in** |
+| 10.1.1 | real-LLM run (4 models / 2 providers) | `tools/llm_planner.py` (keys, **not reproducible**) ; `llm_eval(env)` (replay) | `results/llm/eval.csv` + `eval_summary.csv` | **opt-in** |
 | 10.2 | private production validation | — | — | **not reproducible (private)** |
 
 `make scale` runs §5.2 / §5.2.1 / §5.3 / §5.3.1 (installs the CE apps; structural compare).
@@ -79,7 +79,8 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 - **§5.3.1** the soundness theorem lifts emit 1/5 → 3/5 (4/6 on the Sales-app scan).
 - **§5.5** Postgres RLS, as `app_user`: V-native child read leaks 12 rows / 6 cross-tenant (LEAK); the
   pushdown policy → 6 rows / 0 cross-tenant (SAFE); both positive controls `CONTROL-OK` (parent count 3<6).
-- **§10.1.1** real-LLM ASR-without-guard 2/12, **guarded 0/12** (one run, one model — see caveats).
+- **§10.1.1** real-LLM pooled ASR-without-guard **0.377** (26/69, Wilson 95% CI [0.272, 0.495]), **guarded 0/72**
+  across 4 models / 2 providers (see caveats).
 
 ## 5. Isolation / safety
 The reproduce stack is a pinned compose project **`pgagent-ae`** with its own network
@@ -93,10 +94,13 @@ only `pgagent-ae_*`. No `.env`/credentials are read by the core path.
 - The **scale tier** (§5.2.1, §5.3.1) embeds live Odoo model/field/domain strings from the *installed CE module
   set at the pinned image*. We reproduce its **structure** (gap/domain/sound counts), not byte-equality, across
   patch versions; pin a digest for exact strings.
-- **§10.1.1**: ASR 2/12 is **not a stable rate** (one run, one model, temperature 0, N=12, synthetic). The
-  load-bearing claim is **guarded-leak = 0 regardless of model output**, replayed deterministically from the
-  committed `results/llm/plans.json` with **no** model call. Phase-1 (`llm_planner.py`) needs your own API key
-  and is **not** part of reproduction.
+- **§10.1.1**: the pooled undefended **ASR 0.377 (Wilson 95% CI [0.272, 0.495])** over 4 models / 2 providers /
+  72 prompts is **not a stable production rate** (one generation per model at temperature 0, small N, synthetic;
+  *per-population* CIs, not seed/temperature variance). The load-bearing claim is **guarded-leak = 0 regardless
+  of model output, across every model**, replayed deterministically (byte-stable) from the committed
+  `results/llm/plans.json` with **no** model call. Phase-1 (`llm_planner.py`) needs your own API key(s)
+  (`OPENAI_API_KEY` and/or `DEEPSEEK_API_KEY`; a provider whose key is unset is skipped) and is **not** part of
+  reproduction.
 - **§10.2** (private production numbers) is **not reproducible** from this artifact by design — no real data and
   no real model are included; only the *measurement instrument* (`evaluation_script.py` / `ci_gate`) is public.
 - `config/odoo.mock.conf` documents the **source-install** addons layout; the Docker path passes

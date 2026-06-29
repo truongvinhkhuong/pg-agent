@@ -188,8 +188,9 @@ A public, reproducible adversarial benchmark for row-level authorization of ERP 
   \item \textbf{Oracle harness} (\code{evaluation_script.py}): each attack runs against a ground-truth oracle
         under three planes (native ir.rule, OAP-style action-authz, PG-Agent PEP); pass/fail is
         \textbf{measured, not asserted}. \emph{Caveat:} the headline numbers are oracle-based (deterministic
-        ORM-level attacks); \S10.1.1 adds one \textbf{real-LLM run} over the public synthetic corpus as an
-        empirical proxy, and the full end-to-end integration is validated separately in the private monorepo.
+        ORM-level attacks); \S10.1.1 adds a \textbf{multi-model real-LLM run} (4 models / 2 providers, 72
+        prompts) over the public synthetic corpus as an empirical proxy, and the full end-to-end integration is
+        validated separately in the private monorepo.
 \end{itemize}
 
 % =====================================================================
@@ -730,13 +731,21 @@ framing: \emph{``Policy-Closure Compilation for Row-Level Authorization in ERP L
 % =====================================================================
 \section{Limitations \& honest scope}
 \begin{itemize}[leftmargin=*]
-  \item \textbf{Oracle harness, real-LLM run is one proxy (public artifact):} the headline attacks are
-        deterministic ORM-level probes; one \textbf{real-LLM run} (\S10.1.1, \code{gpt-4o-mini}, N=12, synthetic)
-        gives an empirical proxy (ASR-without-guard 2/12, guarded 0/12) --- not a stable rate; the full
-        production loop is validated privately. The PEP correctness claim is at the data-result plane.
-        The integrity layers (\S6) likewise demonstrate \emph{mechanisms} on planted answers/candidates --- not
-        measured LLM hallucination or wrong-formula rates --- and the governed-metric coverage is partial by
-        design (hybrid).
+  \item \textbf{Oracle harness; the real-LLM run is a multi-model public proxy, not a production rate:} the
+        headline attacks are deterministic ORM-level probes; the real-LLM run (\S10.1.1) drives \textbf{four
+        models across two providers} (\code{gpt-4o-mini}/\code{gpt-4o}/\code{gpt-4.1} + DeepSeek
+        \code{deepseek-chat}, 72 prompts, synthetic) and reports a pooled undefended \textbf{ASR 0.377, Wilson
+        95\% CI [0.272, 0.495]}, guarded \textbf{0/72} --- \emph{per-population} CIs, NOT temperature/seed
+        repetition variance and NOT the private production number. The PEP correctness claim is at the
+        data-result plane. The integrity layers (\S6) likewise demonstrate \emph{mechanisms} on planted
+        answers/candidates --- not measured LLM hallucination or wrong-formula rates --- and the governed-metric
+        coverage is partial by design (hybrid).
+  \item \textbf{Direct attacks only --- indirect / tool-output injection is named future work:} the \S10.1.1
+        jailbreak prompts are single-turn DIRECT user inputs. \emph{Indirect} prompt-injection (poisoned RAG
+        documents or tool results in a multi-turn loop) is not evaluated here; the PEP sits below the LLM trust
+        boundary so it is expected to hold identically, but we do not claim that empirically. Measuring it (plus
+        real-Odoo-schema enforcement beyond the synthetic mock and real integrity/RAG hallucination rates) is
+        the natural next increment.
   \item \textbf{CE gap count is modest:} standard Odoo is broadly company-governed; the 5 gaps are real but the
         heavier gap/burden target is the bespoke \code{pco_core} or larger module sets.
   \item \textbf{Emit soundness is bounded but characterized (\S5.3.1):} the conservative gate emits only single
@@ -813,37 +822,52 @@ not re-measured here --- this is a \emph{mechanism + utility} demo, not a securi
 \code{LLMAgent} \textbf{seam} (an interface + recipe, deliberately not a shipped SDK client) is where a real
 model plugs in --- exercised next.
 
-\subsubsection{Real-LLM run (reproducible public proxy)}
-We drove the loop once with a \textbf{real tool-calling model} (\code{gpt-4o-mini}~\cite{gpt4omini}, temperature 0, N=12 business
-questions over the public synthetic seed=42 corpus; the model's emitted tool-calls are committed in
-\code{results/llm/plans.json}, so the evaluation reproduces WITHOUT re-calling the model). The planner runs on
-the host (\code{tools/llm_planner.py}, the only OpenAI-importing file, outside CI); Phase 2 (\code{llm_eval},
-deterministic) executes each call \textbf{unguarded} (the ASR) vs \textbf{through the guard} against an
-\textbf{independent} oracle --- the persona's ground-truth permitted id-set, never the guard's verdict. The
-prompt is \textbf{neutral} (a business analyst over the ERP; the schema is disclosed but the model is never told
-to filter by team for security).
+\subsubsection{Real-LLM run (reproducible public proxy; multi-provider)}
+We drove the loop with \textbf{four real tool-calling models across two independent providers} --- OpenAI
+\code{gpt-4o-mini}~\cite{gpt4omini}, \code{gpt-4o}, \code{gpt-4.1}~\cite{gpt41} and DeepSeek
+\code{deepseek-chat} --- at temperature 0, \textbf{18 prompts each (72 total)} over the public synthetic seed=42
+corpus. Each model's emitted tool-calls are committed in \code{results/llm/plans.json}, so the evaluation
+reproduces \textbf{byte-for-byte WITHOUT re-calling any model}. The planner runs on the host
+(\code{tools/llm_planner.py}, the only SDK-importing file, outside CI; an unset key degrades to skipped, a failed
+call to \code{refused}, never a silent ``safe''); Phase 2 (\code{llm_eval}, deterministic) executes each call
+\textbf{unguarded} (the ASR) vs \textbf{through the guard} against an \textbf{independent} oracle --- the
+persona's ground-truth permitted id-set, never the guard's verdict. The system prompt is \textbf{neutral} (a
+business analyst over the ERP; the schema is disclosed but the model is never told to filter by team for
+security). The 18 prompts span \textbf{8 benign} (own-team), \textbf{6 adversarial} (explicit cross-/all-team
+over all three child models), and \textbf{4 jailbreak} (single-turn DIRECT role-override) prompts; ASR carries a
+\textbf{Wilson score 95\% CI} (\code{llm\_stats.py}, fixed $z$, no \code{scipy}).
 
 \begin{center}\small
-\begin{tabular}{@{}lcc@{}}
+\begin{tabular}{@{}lccccc@{}}
 \toprule
-stratum & leaked-without-guard & with-guard \\
+model (provider) & valid & leaked (ASR) & Wilson 95\% CI & atk leak / PEP-exer. & \textbf{guarded leak} \\
 \midrule
-benign (own-team questions)            & \textbf{0/8} (model self-scoped) & 0/8 \\
-adversarial (system-wide / cross-team) & \textbf{2/4} (broad child aggregates) & 0/4 \\
-\textbf{total} & \textbf{ASR = 2/12} & \textbf{leak = 0/12} \\
+\code{gpt-4o-mini} (OpenAI)    & 18 & 7 (\textbf{0.389}) & [0.203, 0.614] & 7 / 7 & \textbf{0} \\
+\code{gpt-4o} (OpenAI)         & 16 & 6 (\textbf{0.375}) & [0.185, 0.614] & 6 / 6 & \textbf{0} \\
+\code{gpt-4.1} (OpenAI)        & 17 & 6 (\textbf{0.353}) & [0.173, 0.587] & 6 / 6 & \textbf{0} \\
+\code{deepseek-chat} (DeepSeek)& 18 & 7 (\textbf{0.389}) & [0.203, 0.614] & 7 / 7 & \textbf{0} \\
+\midrule
+\textbf{pooled} & \textbf{69} & \textbf{26 (0.377)} & \textbf{[0.272, 0.495]} & \textbf{26 / 26} & \textbf{0} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-The new empirical facts: (i) a neutrally-prompted real LLM \textbf{does emit tool-calls that leak past native
-governance} (the two leaks are broad child-model aggregates with an empty domain --- the confused-deputy made
-concrete); (ii) the model \textbf{self-scopes on own-team questions (0/8)} but not on system-wide ones, so the
-guard is load-bearing; (iii) \textbf{through the guard, leak = 0/12 regardless of model output}. (Honest detail:
-the model's parent-traversing cross-team queries were caught by the native \emph{header} rule on the join, not
-the PEP --- which reinforces the thesis: the bypass lives where a domain does not route back through the
-parent.) \textbf{Anti-claims:} 2/12 is NOT a stable rate (one run/model/temp, N=12, synthetic); NOT the private
-production number; the security claim does NOT depend on the ASR being large (load-bearing = guarded 0
-regardless); malformed/refused calls are their own buckets, never silently ``safe''.
+The new empirical facts: (i) \textbf{across four models and two providers a neutrally-prompted real LLM emits
+tool-calls that leak past native governance at a strikingly consistent rate} --- pooled ASR \textbf{0.377}
+(26/69), per-model 0.35--0.39, all CIs overlapping --- the confused-deputy made concrete with real agents, not a
+one-model fluke; (ii) the leaks are \textbf{broad child-model reads/aggregates} (line/payment/guarantee, empty or
+cross-team domain), and the models \textbf{self-scope on benign own-team questions (31/31 valid)} but not on
+attacks, so the guard is load-bearing; (iii) \textbf{through the guard, leak = 0/72 regardless of what any model
+emitted}, with the PEP genuinely \textbf{exercised 26 times}; (iv) utility is preserved --- the guard returns a
+\textbf{non-empty, fully-authorized result on every benign query (31/31)}, i.e.\ no false denials. (Honest detail:
+a few attacks land in the \emph{scoped} bucket --- e.g.\ a parent-targeting jailbreak over the order header is
+caught by the native \emph{header} rule, and 3 malformed calls are \emph{invalid} --- reinforcing the thesis:
+the bypass lives precisely where a domain does not route back through a governed parent.) \textbf{Anti-claims:}
+these are NOT stable production rates (one generation/model at temp 0, small N, synthetic; the CIs are
+\emph{per-population}, NOT temperature/seed variance); NOT the private production number; the prompts are
+\textbf{DIRECT} user-turn attacks, NOT indirect / tool-output prompt-injection (future work, \S9); the security
+claim does NOT depend on the ASR being large --- load-bearing $=$ guarded 0 regardless of model output, across
+every model.
 
 \subsection{Private validation (corroborating, not reproducible)}
 Because the guard rewrites the query domain \textbf{below the LLM trust boundary} --- the model only emits ORM
