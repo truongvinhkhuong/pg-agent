@@ -62,6 +62,7 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 | 10.1 | agent-loop proxy (no LLM) | `agent_loop(env)` | `results/agent_loop.csv` | reproduce-all |
 | 10.1.1 | real-LLM run (4 models / 2 providers) | `tools/llm_planner.py` (keys, **not reproducible**) ; `llm_eval(env)` (replay) | `results/llm/eval.csv` + `eval_summary.csv` | **opt-in** |
 | 10.1.2 | indirect / tool-output injection (real 2-turn) | `tools/llm_planner.py --mode indirect` (keys) ; `llm_eval(env)` (replay) | `results/llm/eval_summary.csv` (scope=indirect) | **opt-in** |
+| 10.1.3 | real-LLM reliability & residual (variance / integrity rate / answer-channel) | `llm_reliability_prepare(env)` ; `tools/llm_reliability.py` (keys) ; `llm_reliability_eval(env)` (replay) | `results/llm/reliability.csv` | **opt-in** |
 | 10.2 | private production validation | — | — | **not reproducible (private)** |
 
 `make scale` runs §5.2 / §5.2.1 / §5.3 / §5.3.1 (installs the CE apps; structural compare).
@@ -90,6 +91,9 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
   across 4 models / 2 providers (see caveats).
 - **§10.1.2** indirect / tool-output injection (real 2-turn, poisoned RAG/ERP-note): **7/20** probes induced a
   cross-team call (10/20 resisted; `gpt-4o` resisted all 5), **guarded 0/20** — PEP provenance-invariance.
+- **§10.1.3** real-LLM reliability/residual (4 models, MEASUREMENTS not claims): temp-0.7 ASR variance mean
+  **0.36–0.40** (stable, guarded 0/rep); real integrity wrong-number rate **0.33–0.50** (verifier catches 0.50–0.67);
+  answer-channel residual — authorized value paraphrased past the output-validator in **~50%** of forms (not a guard leak).
 
 ## 5. Isolation / safety
 The reproduce stack is a pinned compose project **`pgagent-ae`** with its own network

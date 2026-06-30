@@ -1,0 +1,95 @@
+{
+  "meta": {
+    "note": "governed vals per INTEGRITY question; seed=42 deterministic; Phase-1 prompt + Phase-2 gold (single source of truth)"
+  },
+  "integrity": [
+    {
+      "id": "int-agg-qty",
+      "kind": "aggregation",
+      "persona": "ttv",
+      "gold_kind": "sum",
+      "measure": "quantity",
+      "model": "pco.sale.order.line",
+      "groupby": "product_name",
+      "vals": [
+        38.0,
+        19.0,
+        44.0,
+        37.0,
+        18.0
+      ]
+    },
+    {
+      "id": "int-agg-amount",
+      "kind": "aggregation",
+      "persona": "viewer_all",
+      "gold_kind": "sum",
+      "measure": "amount_total",
+      "model": "pco.sale.order",
+      "groupby": "team_code",
+      "vals": [
+        2181300000.0,
+        3767500000.0,
+        2214300000.0,
+        3324200000.0
+      ]
+    },
+    {
+      "id": "int-ratio-share",
+      "kind": "ratio",
+      "persona": "ttv",
+      "gold_kind": "top-share",
+      "measure": "quantity",
+      "model": "pco.sale.order.line",
+      "groupby": "product_name",
+      "vals": [
+        38.0,
+        19.0,
+        44.0,
+        37.0,
+        18.0
+      ]
+    },
+    {
+      "id": "int-growth-pct",
+      "kind": "growth-pct",
+      "persona": "ttv",
+      "gold_kind": "growth",
+      "measure": "quantity",
+      "model": "pco.sale.order.line",
+      "groupby": "period",
+      "vals": [
+        31.0,
+        125.0
+      ]
+    },
+    {
+      "id": "int-period-cmp",
+      "kind": "period-comparison",
+      "persona": "ttv",
+      "gold_kind": "period-diff",
+      "measure": "quantity",
+      "model": "pco.sale.order.line",
+      "groupby": "period",
+      "vals": [
+        31.0,
+        125.0
+      ]
+    },
+    {
+      "id": "int-multistep",
+      "kind": "multi-step",
+      "persona": "viewer_all",
+      "gold_kind": "pairwise-diff",
+      "measure": "amount_total",
+      "model": "pco.sale.order",
+      "groupby": "team_code",
+      "vals": [
+        2181300000.0,
+        3767500000.0,
+        2214300000.0,
+        3324200000.0
+      ]
+    }
+  ]
+}

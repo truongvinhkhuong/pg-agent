@@ -811,8 +811,11 @@ framing: \emph{``Policy-Closure Compilation for Row-Level Authorization in ERP L
         where the PEP holds \textbf{provenance-blind} (guarded leak 0 across 92 prompts; 7/20 indirect probes
         genuinely induced a leaking call). Explicitly \textbf{out of scope / not closed}: the \textbf{answer
         channel} --- an injection that makes the model paraphrase, into prose, data it \emph{already legitimately
-        holds} is an output-validation residual (\S4.3/\S7), not a PEP property. Other future increments:
-        real integrity/RAG hallucination rates, and temperature/seed repetition variance.
+        holds} is an output-validation residual (\S4.3/\S7), not a PEP property --- now \textbf{measured}
+        (\S10.1.3: authorized confidential values survive the output-validator in $\sim$50\% of paraphrase forms),
+        still not closed. \S10.1.3 also measures the \textbf{temperature/seed variance} of the \S10.1.1 ASR
+        (stable, mean 0.36--0.40 @ temp 0.7) and the \textbf{real integrity wrong-number rate} (models mis-compute
+        $\sim$half; verifier catches 0.50--0.67). Remaining: real \textbf{embedding-RAG} rate (the \S7 ranker is lexical).
   \item \textbf{Real-schema enforcement is owner-axis / single-company (\S5.6):} the PEP is now shown on the
         \textbf{real, unmodified upstream Odoo \code{sale.order}/\code{sale.order.line}} (not just the synthetic
         mock) for \textbf{both} the read plane (12/6 $\to$ 6/0) \textbf{and} the write plane (3 structural
@@ -983,6 +986,35 @@ fooled and NOT what it writes into its \textbf{natural-language answer}. Injecti
 into prose, data it \emph{already legitimately holds} is an \textbf{answer-channel / output-validation residual}
 (\S4.3, \S7) --- out of PEP scope, NOT closed here. We claim only: \emph{for the row-retrieval channel,
 leak-elimination is provenance-blind}; not reduced injection-success, not a protected answer channel.
+
+\subsubsection{Real-LLM reliability \& residual (measurements, not claims).}
+One Phase-1 run (\code{tools/llm\_reliability.py}, replayed deterministically) yields three real-model
+MEASUREMENTS across 4 models / 2 providers (NOT new security claims).
+
+\begin{center}\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+measurement & per-model result & finding \\
+\midrule
+(1) temp/seed variance of the §10.1.1 ASR (18×K=5 reps @ temp 0.7) & ASR mean \textbf{0.36--0.40} & temp-0 headline \textbf{0.377 is stable}; guarded leak 0/rep \\
+(2) real integrity wrong-number rate (6 numeric Qs, free text) & wrong \textbf{0.33--0.50}; verifier caught 0.50--0.67 & models mis-compute \textbf{$\sim$half}; verifier catches most \\
+(3) answer-channel residual (paraphrase an authorized value) & present 4/4; validator \textbf{misses 0.50} & the named residual is \textbf{real $\sim$50\%} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+(i) \textbf{Variance:} at temperature 0.7 across 5 reps every model stays within $\approx\pm0.06$ of its mean and
+the pool brackets the cited 0.377, with the guard invariant (leak 0) on every rep --- the §10.1.1 headline is not
+a temp-0 artifact. (ii) \textbf{Integrity:} a real LLM, even given the correct pre-aggregated values, produces a
+\textbf{silently-wrong number on $\sim$half} the questions; the bind-to-execution verifier (§6) flags 0.50--0.67 of
+them --- the integrity threat made empirical (we size the real error rate the verifier must catch). (iii)
+\textbf{Answer-channel:} when AUTHORIZED to see a confidential value, every model re-renders it and \textbf{half}
+the paraphrase forms (\code{năm mươi triệu}; \code{KH - TTF - 001}) survive the regex/substring output-validator.
+\textbf{Anti-claim:} (2)/(3) are measurements of real-model behaviour, NOT security claims; the answer-channel
+residual is NOT a guard/PEP leak (the PEP never returned this value unauthorized --- the model was AUTHORIZED; the
+residual lives in the answer channel, §4.3/§7). We SIZE the named residual; we do NOT close it. The only invariant
+asserted is guarded leak 0; every stochastic number is a finding (WARN where unexercised). Byte-stable
+\code{results/llm/reliability.csv}; offline calibration \code{tests/test\_llm\_reliability.py}.
 
 \subsection{Private validation (corroborating, not reproducible)}
 Because the guard rewrites the query domain \textbf{below the LLM trust boundary} --- the model only emits ORM

@@ -710,8 +710,11 @@ Agents."*
   **row-retrieval** channel, and the PEP holds **provenance-blind** (guarded leak 0 across 92 prompts, 7/20
   indirect probes genuinely induced a leaking call). What remains explicitly **out of scope and not closed** is
   the **answer channel**: an injection that makes the model paraphrase, into prose, data it *already legitimately
-  holds* (own-team rows) is an output-validation residual (§4.3/§7), not a PEP property. Other future increments:
-  real integrity/RAG hallucination rates, and temperature/seed repetition variance.
+  holds* (own-team rows) is an output-validation residual (§4.3/§7), not a PEP property — now **measured** (§10.1.3:
+  authorized confidential values survive the output-validator in ~50% of paraphrase forms), but still not closed.
+  **§10.1.3** also now measures the **temperature/seed variance** of the §10.1.1 ASR (stable, mean 0.36–0.40 at
+  temp 0.7) and the **real integrity wrong-number rate** (real models mis-compute ~half the numeric questions; the
+  verifier catches 0.50–0.67). Remaining: real **embedding-RAG** hallucination rate (the §7 ranker is lexical).
 - **Real-schema enforcement is owner-axis / single-company (§5.6):** the PEP is now shown on the **real,
   unmodified upstream Odoo `sale.order`/`sale.order.line`** (not just the synthetic mock) for **both** the read
   plane (12/6 → 6/0) **and** the write plane (3 structural confused-deputy mutations breach undefended and the
@@ -875,6 +878,40 @@ prose, data it **already legitimately holds** (own-team rows) is an **answer-cha
 this result. We claim only: *for the row-retrieval channel, leak-elimination is provenance-blind.* We do **not**
 claim reduced injection-success or a protected answer channel; and as in §10.1.1 these are not stable production
 rates (one generation/model at temp 0, small N, synthetic).
+
+#### 10.1.3 Real-LLM reliability & residual — variance, integrity rate, answer-channel (measurements, not claims) · [`results/llm/`](../results/llm/)
+
+Three real-model **measurements** (not new security claims), produced by one Phase-1 run
+([`tools/llm_reliability.py`](../tools/llm_reliability.py) → committed `reliability_plans.json`; replayed
+deterministically by `llm_reliability_eval`, byte-stable `reliability.csv`). Across 4 models / 2 providers:
+
+| measurement | result (per-model range) | finding |
+|---|---|---|
+| **(1) Temperature/seed variance** of the §10.1.1 undefended ASR — 18 prompts × **K=5 reps @ temp 0.7** | ASR mean **0.36–0.40**, per-model range as tight as [0.389,0.389] to [0.353,0.467] | the temp-0 headline **0.377** is **stable under temperature**; guarded leak **0** every rep |
+| **(2) Real integrity (wrong-number) rate** — 6 numeric questions answered in free text over governed values | **wrong 2–3/6 (0.33–0.50)**; numeric-verifier caught **0.50–0.67** of the wrong | real models **silently mis-compute ERP numbers ~half the time**; the verifier catches most, not all |
+| **(3) Answer-channel residual** — paraphrase an authorized confidential value past the output-validator | value present **4/4**; validator **misses 2/4 (0.50)**; resist 0 | the named residual is **real and ~50%**: spelled-out words & separator-split codes evade the regex/substring validator |
+
+The genuinely-new facts: (i) **variance** — the §10.1.1 ASR is not a temp-0 artifact: at temperature 0.7 across 5
+repetitions every model stays within ≈±0.06 of its mean and the pool brackets the cited 0.377, while the guard
+invariant (leak 0) holds on every rep; (ii) **integrity** — a real LLM, even handed the correct pre-aggregated
+values, produces a **silently-wrong number on ~half** the questions (growth-%, multi-step diffs, share-of-total),
+and the bind-to-execution numeric verifier (§6) flags **0.50–0.67** of those — the integrity threat made empirical
+(the planted-answer mechanism in §6 shows the verifier's behaviour; here we size the *real* error rate it must
+catch); (iii) **answer-channel** — when explicitly authorized to see a confidential value, every model re-renders
+it in prose, and **half** the paraphrase forms (`năm mươi triệu` for 50 000 000; `KH - TTF - 001` for the code)
+**survive the output-validator**, quantifying the §4.3/§7 residual.
+
+**Anti-claims (the precise line).** (2) and (3) are **measurements of real-model behaviour, NOT security claims**.
+The answer-channel residual is **not a guard/PEP leak**: the PEP is a query-domain enforcement point and never
+returned this value to an unauthorized party — the model was **authorized** to see it; the residual lives entirely
+in the **answer channel** (out of PEP scope, §4.3/§7), where the output-validator is a recall-favouring last line
+that itself documents words/split-codes evade it. We **size** this named residual; we do **not** close it (closing
+it needs answer-side semantic/LLM-judge validation, out of scope for a data-plane PEP). The integrity rate is a
+reliability finding orthogonal to authorization. The variance is *per-population repetition* spread over one K-rep
+sampling — not a stable production rate, and re-running Phase-1 is not reproducible (the committed reps are). The
+only invariant asserted is **guarded leak 0**; every stochastic number is reported as a finding, with explicit
+WARNs where a measurement is unexercised (e.g. a model that makes no arithmetic error leaves the verifier untested
+that run).
 
 ### 10.2 Private validation (corroborating, not reproducible)
 
