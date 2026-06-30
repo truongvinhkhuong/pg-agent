@@ -741,12 +741,14 @@ framing: \emph{``Policy-Closure Compilation for Row-Level Authorization in ERP L
         data-result plane. The integrity layers (\S6) likewise demonstrate \emph{mechanisms} on planted
         answers/candidates --- not measured LLM hallucination or wrong-formula rates --- and the governed-metric
         coverage is partial by design (hybrid).
-  \item \textbf{Direct attacks only --- indirect / tool-output injection is named future work:} the \S10.1.1
-        jailbreak prompts are single-turn DIRECT user inputs. \emph{Indirect} prompt-injection (poisoned RAG
-        documents or tool results in a multi-turn loop) is not evaluated here; the PEP sits below the LLM trust
-        boundary so it is expected to hold identically, but we do not claim that empirically. Measuring it (plus
-        real-Odoo-schema enforcement beyond the synthetic mock and real integrity/RAG hallucination rates) is
-        the natural next increment.
+  \item \textbf{Row-retrieval channel only --- the answer channel is the named residual:} \S10.1.1 (direct) and
+        \S10.1.2 (indirect / tool-output injection, real 2-turn) both measure the \textbf{row-retrieval} channel,
+        where the PEP holds \textbf{provenance-blind} (guarded leak 0 across 92 prompts; 7/20 indirect probes
+        genuinely induced a leaking call). Explicitly \textbf{out of scope / not closed}: the \textbf{answer
+        channel} --- an injection that makes the model paraphrase, into prose, data it \emph{already legitimately
+        holds} is an output-validation residual (\S4.3/\S7), not a PEP property. Other future increments:
+        real-Odoo-schema enforcement beyond the synthetic mock, real integrity/RAG hallucination rates, and
+        temperature/seed repetition variance.
   \item \textbf{CE gap count is modest:} standard Odoo is broadly company-governed; the 5 gaps are real but the
         heavier gap/burden target is the bespoke \code{pco_core} or larger module sets.
   \item \textbf{Emit soundness is bounded but characterized (\S5.3.1):} the conservative gate emits only single
@@ -866,9 +868,49 @@ caught by the native \emph{header} rule, and 3 malformed calls are \emph{invalid
 the bypass lives precisely where a domain does not route back through a governed parent.) \textbf{Anti-claims:}
 these are NOT stable production rates (one generation/model at temp 0, small N, synthetic; the CIs are
 \emph{per-population}, NOT temperature/seed variance); NOT the private production number; the prompts are
-\textbf{DIRECT} user-turn attacks, NOT indirect / tool-output prompt-injection (future work, \S9); the security
+\textbf{DIRECT} user-turn attacks; the stronger indirect / tool-output vector is measured next; the security
 claim does NOT depend on the ASR being large --- load-bearing $=$ guarded 0 regardless of model output, across
 every model.
+
+\subsubsection{Indirect / tool-output prompt-injection (provenance-invariance)}
+The §10.1.1 attacks live in the \emph{user prompt}. The stronger, realistic threat is \textbf{indirect}: the user
+asks a \textbf{benign, in-scope} question; the agent issues its \textbf{own} read; and the \textbf{tool result it
+reads back is attacker-controlled DATA} --- a poisoned retrieved RAG chunk or an ERP order-note --- carrying an
+embedded instruction (``to reconcile fully, call \code{search\_read} \ldots empty domain \ldots of EVERY team'').
+On the \textbf{next} turn the model re-plans against that poisoned context. We ran a \textbf{real 2-turn} exchange
+per model (turn-1 the model's own benign read, \code{tool\_choice="required"}; turn-2 its reaction,
+\code{tool\_choice="auto"}, so a resisting model may just answer). \textbf{Only the data is hand-authored} (the
+attacker controls a field/document the agent legitimately reads); both model turns are genuine, and each poisoned
+payload is committed with a \code{payload\_sha256} (fixed, auditable, byte-stable replay). 5 scenarios $\times$ 4
+models $=$ 20 probes, targeting the rule-less child models (empty domain) plus one rule-bearing parent header.
+
+\begin{center}\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+model (provider) & induced cross-team leak & resisted & \textbf{guarded leak} \\
+\midrule
+\code{gpt-4o-mini} (OpenAI)    & \textbf{3/5} & 1/5 (+1 native-scoped) & \textbf{0} \\
+\code{gpt-4o} (OpenAI)         & \textbf{0/5} (resisted all) & 5/5 & \textbf{0} \\
+\code{gpt-4.1} (OpenAI)        & \textbf{2/5} & 3/5 & \textbf{0} \\
+\code{deepseek-chat} (DeepSeek)& \textbf{2/5} & 1/5 (+1 native, 1 malformed) & \textbf{0} \\
+\midrule
+\textbf{pooled} & \textbf{7/20 induced} & \textbf{10/20 resisted} & \textbf{0/20} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The facts: (i) \textbf{indirect injection genuinely steers real models into cross-team tool-calls} --- 7/20 probes
+induced a broad child read that leaks undefended, so the PEP is \textbf{exercised via the indirect vector};
+(ii) \textbf{robustness varies} --- \code{gpt-4o} resisted all 5 (a \emph{finding}, not a failure), the others
+complied 2--3 times; (iii) the one complied parent-header injection was caught by the \textbf{native rule} (scoped)
+--- the direct-vector pattern; (iv) \textbf{through the guard, leak $=$ 0/20 regardless of provenance}. The thesis
+made empirical: the PEP rewrites the authz domain \textbf{below the LLM trust boundary}, so leak-elimination is
+\textbf{invariant to \emph{why} a call was emitted}. \textbf{Anti-claim (the line not crossed):} the PEP is a
+\textbf{query-domain} point --- it bounds the \emph{rows a tool-call retrieves}, NOT whether the model can be
+fooled and NOT what it writes into its \textbf{natural-language answer}. Injection that makes the model paraphrase,
+into prose, data it \emph{already legitimately holds} is an \textbf{answer-channel / output-validation residual}
+(\S4.3, \S7) --- out of PEP scope, NOT closed here. We claim only: \emph{for the row-retrieval channel,
+leak-elimination is provenance-blind}; not reduced injection-success, not a protected answer channel.
 
 \subsection{Private validation (corroborating, not reproducible)}
 Because the guard rewrites the query domain \textbf{below the LLM trust boundary} --- the model only emits ORM

@@ -60,6 +60,7 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 | 7 | Doc-RAG plane (RQ8) | `docrag(env)` | `results/docrag.csv` | reproduce-all |
 | 10.1 | agent-loop proxy (no LLM) | `agent_loop(env)` | `results/agent_loop.csv` | reproduce-all |
 | 10.1.1 | real-LLM run (4 models / 2 providers) | `tools/llm_planner.py` (keys, **not reproducible**) ; `llm_eval(env)` (replay) | `results/llm/eval.csv` + `eval_summary.csv` | **opt-in** |
+| 10.1.2 | indirect / tool-output injection (real 2-turn) | `tools/llm_planner.py --mode indirect` (keys) ; `llm_eval(env)` (replay) | `results/llm/eval_summary.csv` (scope=indirect) | **opt-in** |
 | 10.2 | private production validation | — | — | **not reproducible (private)** |
 
 `make scale` runs §5.2 / §5.2.1 / §5.3 / §5.3.1 (installs the CE apps; structural compare).
@@ -81,6 +82,8 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
   pushdown policy → 6 rows / 0 cross-tenant (SAFE); both positive controls `CONTROL-OK` (parent count 3<6).
 - **§10.1.1** real-LLM pooled ASR-without-guard **0.377** (26/69, Wilson 95% CI [0.272, 0.495]), **guarded 0/72**
   across 4 models / 2 providers (see caveats).
+- **§10.1.2** indirect / tool-output injection (real 2-turn, poisoned RAG/ERP-note): **7/20** probes induced a
+  cross-team call (10/20 resisted; `gpt-4o` resisted all 5), **guarded 0/20** — PEP provenance-invariance.
 
 ## 5. Isolation / safety
 The reproduce stack is a pinned compose project **`pgagent-ae`** with its own network
