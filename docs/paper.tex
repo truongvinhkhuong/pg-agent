@@ -626,6 +626,37 @@ Scope: read / owner axis / single company / draft; company-axis + write-plane on
 Byte-stable: \code{make real-sale} regenerates \code{results/real\_sale.csv} (counts/verdicts only) + byte-diffs;
 \code{tests/test\_real\_schema.py} calibrates it + the positive control + a driver lint in CI without Docker.
 
+\paragraph{Write plane on the real schema.} The same bespoke role is given \textbf{full CRUD on
+\code{sale.order.line}} (staff legitimately \emph{manage} lines) while the line rule stays forgotten, extending the
+confused-deputy to \textbf{mutation}. As the restricted user A we attempt four cross-owner writes on B's data
+(each savepoint-isolated; breach via sudo \code{search\_count}, independent of the guard), undefended vs through
+the PEP write-check (USING + WITH-CHECK), passing A's per-call LOCAL policy via the \code{policy=} kwarg.
+
+\begin{center}\small
+\begin{tabular}{@{}llccc@{}}
+\toprule
+attack & op & undefended & with PEP & outcome \\
+\midrule
+unlink B's line            & unlink & \textbf{breach} & denied & \textbf{held} \\
+create a line on B's order & create & \textbf{breach} & denied & \textbf{held} \\
+reassign A's line to B's order & write & \textbf{breach} & denied & \textbf{held} \\
+overwrite a field on B's line & write & denied & denied & n/a --- native block \\
+positive-control (A's OWN line) & write & --- & --- & \textbf{SUCCESS} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The three \textbf{structural} confused-deputy writes all \textbf{breach native governance undefended} and the PEP
+write-check \textbf{holds every one} (USING denies a foreign target; WITH-CHECK denies a create/reassign whose
+\code{order\_id} resolves to a foreign owner); the \textbf{positive control} (A's own line, guarded) \textbf{succeeds}
+(permissive in-scope, and the LOCAL policy threaded through the WITH-CHECK). \textbf{Honest finding:} a foreign
+\emph{field}-overwrite does NOT breach --- Odoo incidentally blocks it (writing a line whose parent A cannot read
+raises \code{AccessError}); the PEP denies it too (defense-in-depth), but we report it as a native block rather than
+inflate the count. Every attempt is rolled back (savepoint + \code{env.clear()}); a post-run snapshot asserts the DB
+is bit-for-bit back to seed. Scope: owner axis / single company / draft; company-axis + confirmed/multi-company
+writes are future work. Byte-stable \code{results/real\_sale\_write.csv}; calibrated offline by
+\code{tests/test\_real\_schema.py}.
+
 % =====================================================================
 \section{Integrity --- RQ6 (applied / adopt-not-invent)}
 A reliability threat orthogonal to authorization: an LLM agent that retrieves the \emph{right} rows can still
@@ -782,11 +813,14 @@ framing: \emph{``Policy-Closure Compilation for Row-Level Authorization in ERP L
         channel} --- an injection that makes the model paraphrase, into prose, data it \emph{already legitimately
         holds} is an output-validation residual (\S4.3/\S7), not a PEP property. Other future increments:
         real integrity/RAG hallucination rates, and temperature/seed repetition variance.
-  \item \textbf{Real-schema enforcement is read / owner axis only (\S5.6):} the PEP is now shown on the
+  \item \textbf{Real-schema enforcement is owner-axis / single-company (\S5.6):} the PEP is now shown on the
         \textbf{real, unmodified upstream Odoo \code{sale.order}/\code{sale.order.line}} (not just the synthetic
-        mock), closing the long-standing ``mock-only'' caveat for the read plane with a binding positive control.
-        Still scoped to read / owner axis / single company / draft orders; the company-axis gap and the
-        \textbf{write plane} on real models (the \S4.7 mutation suite runs on the mock) remain future work.
+        mock) for \textbf{both} the read plane (12/6 $\to$ 6/0) \textbf{and} the write plane (3 structural
+        confused-deputy mutations breach undefended, the write-check holds all three; an own write still succeeds),
+        closing the long-standing ``mock-only'' caveat with a binding positive control. Still scoped to owner axis
+        / single company / draft orders; the company-axis gap, confirmed/locked orders, and multi-company writes on
+        the real schema remain future work (a foreign field-overwrite is incidentally blocked by Odoo's parent-read
+        coupling --- reported as a native block, not an enforcement claim).
   \item \textbf{CE gap count is modest:} standard Odoo is broadly company-governed; the 5 gaps are real but the
         heavier gap/burden target is the bespoke \code{pco_core} or larger module sets.
   \item \textbf{Emit soundness is bounded but characterized (\S5.3.1):} the conservative gate emits only single

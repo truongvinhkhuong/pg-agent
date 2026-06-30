@@ -29,35 +29,39 @@ $DC run --rm --entrypoint odoo odoo -d "$DB" --addons-path="$ADDONS" \
   -i pco_core_mock,pg_agent_guard,sale_management --stop-after-init --no-http --without-demo=all 2>&1 | tail -2
 
 mkdir -p results/repro
-echo "-- seed + probe (real sale.order / sale.order.line) --"
+echo "-- seed + probe (real sale.order / sale.order.line): READ plane + WRITE plane --"
 $DC run --rm -T --entrypoint odoo odoo shell -d "$DB" --addons-path="$ADDONS" \
   --db_host=db --db_port=5432 --db_user=odoo --no-http <<'PY' 2>&1 | grep -v -e 'INFO' -e 'WARNING' -e '^odoo\.' -e '^$'
 exec(open('tools/real_schema.py').read())
-real_schema_run(env, outdir='results/repro')
+real_schema_run(env, outdir='results/repro')          # §5.6 read plane  -> real_sale.csv
+real_schema_write_run(env, outdir='results/repro')    # §5.6 write plane -> real_sale_write.csv (savepoint-isolated)
 env.cr.commit()
 PY
 
-OUT="results/repro/real_sale.csv"
-REF="results/real_sale.csv"
-if [ ! -f "$OUT" ]; then
-  echo "============================================================"
-  echo "REAL-SALE: FAIL  (driver did not emit $OUT — see the shell output above)"; exit 1
-fi
-echo "-- regenerated $OUT --"; cat "$OUT"
+FILES="real_sale.csv real_sale_write.csv"   # read plane + write plane
+for f in $FILES; do
+  OUT="results/repro/$f"
+  if [ ! -f "$OUT" ]; then
+    echo "============================================================"
+    echo "REAL-SALE: FAIL  (driver did not emit $OUT — see the shell output above)"; exit 1
+  fi
+  echo "-- regenerated $OUT --"; cat "$OUT"
+done
 
-if [ ! -f "$REF" ]; then
-  echo "============================================================"
-  echo "REAL-SALE: no committed reference yet ($REF). Review $OUT, then commit it as the reference."
-  exit 0
-fi
+MISSING_REF=0; DIFFS=0
+for f in $FILES; do
+  OUT="results/repro/$f"; REF="results/$f"
+  if [ ! -f "$REF" ]; then echo "  (no committed reference yet: $REF)"; MISSING_REF=$((MISSING_REF+1)); continue; fi
+  if ! diff -q "$REF" "$OUT" >/dev/null 2>&1; then echo "  DIFF: $f"; diff "$REF" "$OUT" || true; DIFFS=$((DIFFS+1)); fi
+done
 
-echo "-- byte-diff $OUT vs committed $REF --"
-if diff -q "$REF" "$OUT" >/dev/null 2>&1; then
-  echo "============================================================"
-  echo "REAL-SALE: PASS  (real-schema enforcement byte-identical to committed reference)"
-  exit 0
-fi
-diff "$REF" "$OUT" || true
 echo "============================================================"
-echo "REAL-SALE: FAIL  (diff above; if this is a first-run/reference refresh, copy $OUT -> $REF and re-verify)"
+if [ "$MISSING_REF" -gt 0 ]; then
+  echo "REAL-SALE: no committed reference yet for $MISSING_REF file(s). Review results/repro/, then commit as references."
+  exit 0
+fi
+if [ "$DIFFS" -eq 0 ]; then
+  echo "REAL-SALE: PASS  (read + write planes byte-identical to committed references)"; exit 0
+fi
+echo "REAL-SALE: FAIL  ($DIFFS diff(s) above; if this is a first-run/reference refresh, copy results/repro/* -> results/ and re-verify)"
 exit 1

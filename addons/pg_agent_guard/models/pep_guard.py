@@ -247,9 +247,9 @@ class PgAgentGuard(models.AbstractModel):
                 out.append({"model": c["model"], "record_id": c["record_id"], "record": rec})
         return out
 
-    def guarded_search_count(self, model, domain=None):
+    def guarded_search_count(self, model, domain=None, policy=None):
         t0 = time.monotonic()
-        dec = self._guard(model, "search_count", domain)
+        dec = self._guard(model, "search_count", domain, policy=policy)
         if not dec.allowed:
             return self._deny("search_count", t0)
         res = self.env[model].search_count(dec.domain)
@@ -257,9 +257,9 @@ class PgAgentGuard(models.AbstractModel):
         return res
 
     def guarded_read_group(self, model, domain=None, fields=None, groupby=None,
-                           offset=0, limit=None, orderby=False, lazy=True):
+                           offset=0, limit=None, orderby=False, lazy=True, policy=None):
         t0 = time.monotonic()
-        dec = self._guard(model, "read_group", domain)
+        dec = self._guard(model, "read_group", domain, policy=policy)
         if not dec.allowed:
             return self._deny("read_group", t0)
 
@@ -346,10 +346,12 @@ class PgAgentGuard(models.AbstractModel):
         parent = self.env[comodel].sudo().browse(int(rid))
         return self._id_of(parent[path.split(".", 1)[1]])
 
-    def _vals_in_authz(self, model, vals, base=None):
+    def _vals_in_authz(self, model, vals, base=None, policy=None):
         """WITH-CHECK: would a record carrying `vals` satisfy every authz leaf?
-        Fail-closed on any unresolved leaf or unsupported operator."""
-        authz = self._authz_domain(model)
+        Fail-closed on any unresolved leaf or unsupported operator. `policy` (optional) is the per-call local
+        registry — it MUST be forwarded here, else the WITH-CHECK would fall back to the global POLICY (which may
+        not contain `model`) and deny for the wrong reason."""
+        authz = self._authz_domain(model, policy)
         if authz is None or authz == [("id", "=", 0)]:
             return False
         for path, op, expected in authz:
@@ -358,14 +360,14 @@ class PgAgentGuard(models.AbstractModel):
                 return False
         return True
 
-    def guarded_create(self, model, vals):
+    def guarded_create(self, model, vals, policy=None):
         """Create only if the new record falls inside the persona's authorization domain.
 
         WITH-CHECK on every governed FK/field in `vals` (e.g. a child's `order_id` must
         point at an in-team parent). Returns the new id, or the uniform deny value.
         """
         t0 = time.monotonic()
-        if self._authz_domain(model) is None or not self._vals_in_authz(model, vals):
+        if self._authz_domain(model, policy) is None or not self._vals_in_authz(model, vals, policy=policy):
             audit_decision(
                 self.env, model, "create", [], allowed=False,
                 reason="write-check: create target outside authorization domain",
@@ -378,12 +380,12 @@ class PgAgentGuard(models.AbstractModel):
         denial.pad_latency(t0)
         return rec.id
 
-    def guarded_write(self, model, ids, vals):
+    def guarded_write(self, model, ids, vals, policy=None):
         """Write only if every target row is in-domain (USING) and the result stays
         in-domain (WITH-CHECK on any governed FK/field being reassigned)."""
         t0 = time.monotonic()
         ids = list(ids) if isinstance(ids, (list, tuple)) else [ids]
-        authz = self._authz_domain(model)
+        authz = self._authz_domain(model, policy)
         if authz is None:
             return self._write_deny(model, "write", t0)
         in_scope = self.env[model].sudo().search([("id", "in", ids)] + authz)
@@ -391,7 +393,7 @@ class PgAgentGuard(models.AbstractModel):
             return self._write_deny(model, "write", t0)
         if any(r in vals for r in self._authz_roots(authz)):   # WITH-CHECK: reassignment
             for rec in self.env[model].sudo().browse(ids):
-                if not self._vals_in_authz(model, vals, base=rec):
+                if not self._vals_in_authz(model, vals, base=rec, policy=policy):
                     return self._write_deny(model, "write", t0)
         self.env[model].browse(ids).write(vals)
         audit_decision(self.env, model, "write", [("id", "in", ids)], allowed=True,
@@ -399,11 +401,11 @@ class PgAgentGuard(models.AbstractModel):
         denial.pad_latency(t0)
         return True
 
-    def guarded_unlink(self, model, ids):
+    def guarded_unlink(self, model, ids, policy=None):
         """Unlink only if every target row is inside the persona's authorization domain."""
         t0 = time.monotonic()
         ids = list(ids) if isinstance(ids, (list, tuple)) else [ids]
-        authz = self._authz_domain(model)
+        authz = self._authz_domain(model, policy)
         if authz is None:
             return self._write_deny(model, "unlink", t0)
         in_scope = self.env[model].sudo().search([("id", "in", ids)] + authz)

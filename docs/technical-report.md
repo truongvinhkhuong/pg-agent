@@ -33,7 +33,8 @@ and the same predicate-pushdown fix on a second engine, **PostgreSQL RLS** (RQ9)
 model to **mutations** — a forced write-check (USING + WITH-CHECK) closes the confused-deputy *write* gap on
 create/write/unlink (RQ10), 12/12 breaching writes held; and (ix) **enforce on the real schema** — the same guard
 closes the scanner-predicted gap on **unmodified upstream Odoo `sale.order`/`sale.order.line`** (not just the
-synthetic mock), read plane, 12/6 → 6/0 with a binding positive control (§5.6).
+synthetic mock) on **both the read plane** (12/6 → 6/0) **and the write plane** (3 structural confused-deputy
+mutations breach undefended, write-check holds all three), each with a binding positive control (§5.6).
 
 The contribution is scoped honestly to **applied security + benchmark + reference implementation** for an
 under-served setting (ERP record-rule governance that is incomplete on child models), not to a novel
@@ -543,6 +544,33 @@ regenerates [`results/real_sale.csv`](../results/real_sale.csv) (counts/verdicts
 byte-diffs it; `tests/test_real_schema.py` calibrates the invariants + the positive control + a static lint of the
 driver in CI without Docker.
 
+**Write plane on the real schema** ([`results/real_sale_write.csv`](../results/real_sale_write.csv)). The same
+bespoke role is given **full CRUD on `sale.order.line`** (a deployment that legitimately lets staff *manage* lines)
+while the line-level rule stays forgotten — so the confused-deputy now extends to **mutation**. As the restricted
+user A we attempt four cross-owner writes on B's data (each savepoint-isolated; breach measured via sudo
+`search_count`, independent of the guard), undefended vs through the PEP write-check (USING + WITH-CHECK), passing
+A's per-call LOCAL policy via the additive `policy=` kwarg (global `POLICY` untouched):
+
+| attack | op | undefended | with PEP | outcome |
+|---|---|---|---|---|
+| unlink-foreign-child (delete B's line) | unlink | **breach** | denied | **held** |
+| create-foreign-parent (add a line to B's order) | create | **breach** | denied | **held** |
+| cross-owner-reassignment (move A's line onto B's order) | write | **breach** | denied | **held** |
+| write-foreign-child (overwrite a field on B's line) | write | denied | denied | n/a — native block |
+| positive-control (A's OWN line, guarded) | write | — | — | **SUCCESS** |
+
+The three **structural** confused-deputy writes (unlink / create / reassign) all **breach native governance
+undefended** and the PEP write-check **holds every one** (USING denies a foreign target; WITH-CHECK denies a
+create/reassign whose `order_id` resolves to a foreign owner). The **positive control** — A's own line, written
+through the guard, **succeeds** — proves the guard is permissive in-scope (not blanket-denying) and that the LOCAL
+policy threaded correctly through the WITH-CHECK. **Honest finding:** the fourth vector, a foreign *field*
+overwrite, does **not** breach — Odoo incidentally blocks it because writing a line whose parent order A cannot
+read raises an `AccessError` (a parent-read coupling); the PEP denies it too (defense-in-depth), but it is **not**
+a gap we close, and we report it as a native block rather than inflate the count. Every attempt is rolled back
+(savepoint + `env.clear()`); a post-run snapshot asserts the DB is bit-for-bit back to seed (12 lines / 6 orders /
+0 sentinel rows). Scope: owner axis, single company, draft orders; the company axis, confirmed/locked orders, and
+multi-company writes on the real schema are future work.
+
 ---
 
 ## 6. Integrity — RQ6 (applied / adopt-not-invent)
@@ -684,11 +712,14 @@ Agents."*
   the **answer channel**: an injection that makes the model paraphrase, into prose, data it *already legitimately
   holds* (own-team rows) is an output-validation residual (§4.3/§7), not a PEP property. Other future increments:
   real integrity/RAG hallucination rates, and temperature/seed repetition variance.
-- **Real-schema enforcement is read / owner axis only (§5.6):** the PEP enforcement is now shown on the **real,
-  unmodified upstream Odoo `sale.order`/`sale.order.line`** (not just the synthetic mock) — closing the long-standing
-  "mock model only" caveat for the read plane, with the in-band positive control proving the run is non-bypassing.
-  Still scoped to the **read plane, owner axis, single company, draft orders**: the company-axis gap and the
-  **write plane** on real models (the §4.7 mutation suite currently runs on the mock) remain future work.
+- **Real-schema enforcement is owner-axis / single-company (§5.6):** the PEP is now shown on the **real,
+  unmodified upstream Odoo `sale.order`/`sale.order.line`** (not just the synthetic mock) for **both** the read
+  plane (12/6 → 6/0) **and** the write plane (3 structural confused-deputy mutations breach undefended and the
+  write-check holds all three; an own write still succeeds) — closing the long-standing "mock model only" caveat,
+  with the in-band positive control proving the run is non-bypassing. Still scoped to the **owner axis, single
+  company, draft orders**: the company-axis gap, confirmed/locked orders, and multi-company writes on the real
+  schema remain future work. (A foreign field-overwrite is incidentally blocked by Odoo's parent-read coupling —
+  reported as a native block, not an enforcement claim.)
 - **CE gap rate is low per model but endemic across domains (§5.2.1):** standard Odoo is broadly
   company-governed, so per model the gap is rare (15 of 2 072 reachable child×axis pairs, 0.7%); the finding is
   **breadth** — it recurs in 6 of 8 at-risk domains — not a high per-model rate. The headline is the per-domain

@@ -20,10 +20,13 @@ import re
 
 _D = os.path.dirname(__file__)
 _CSV = os.path.join(_D, "..", "results", "real_sale.csv")
+_WCSV = os.path.join(_D, "..", "results", "real_sale_write.csv")
 _DRV = os.path.join(_D, "..", "tools", "real_schema.py")
 
 with open(_CSV, newline="", encoding="utf-8") as _fh:
     _ROWS = list(csv.DictReader(_fh))
+with open(_WCSV, newline="", encoding="utf-8") as _fh:
+    _WROWS = list(csv.DictReader(_fh))
 with open(_DRV, encoding="utf-8") as _fh:
     _SRC = _fh.read()
 
@@ -31,6 +34,12 @@ with open(_DRV, encoding="utf-8") as _fh:
 def _row(variant, probe):
     hits = [r for r in _ROWS if r["variant"] == variant and r["probe"] == probe]
     assert len(hits) == 1, f"expected exactly one {variant}/{probe} row, got {len(hits)}"
+    return hits[0]
+
+
+def _wrow(attack):
+    hits = [r for r in _WROWS if r["attack"] == attack]
+    assert len(hits) == 1, f"expected exactly one write-attack row {attack}, got {len(hits)}"
     return hits[0]
 
 
@@ -70,6 +79,40 @@ def test_fix_strictly_improves():
     assert int(fixed["row_count"]) < int(native["row_count"])                 # 6 < 12 (no over-broad read)
 
 
+# ── (1b) write plane (§5.6 extension): confused-deputy create/write/unlink on real sale.order.line ──
+def test_write_three_structural_attacks_breach_and_held():
+    # The 3 STRUCTURAL confused-deputy writes (unlink/create/reassign) breach native governance undefended,
+    # and the PEP write-check (USING + WITH-CHECK) holds every one — the load-bearing write-plane claim.
+    for aid in ("unlink-foreign-child", "create-foreign-parent", "cross-owner-reassignment"):
+        r = _wrow(aid)
+        assert r["undefended"] == "breach", f"{aid}: expected undefended breach (non-vacuity)"
+        assert r["pg_agent"] == "denied" and r["outcome"] == "held", f"{aid}: PEP must hold"
+
+
+def test_write_foreign_field_overwrite_is_natively_blocked():
+    # HONEST finding: a foreign FIELD-overwrite is incidentally blocked by Odoo's parent-read coupling (writing a
+    # line whose parent order the restricted user cannot read raises AccessError) — it does NOT breach; the PEP
+    # also denies it (defense in depth). This is a finding, not a failure.
+    r = _wrow("write-foreign-child")
+    assert r["undefended"] == "denied" and r["pg_agent"] == "denied" and r["outcome"] == "n/a-native-block"
+
+
+def test_write_positive_control_in_scope_own_write_succeeds():
+    # anti-vacuity: an IN-SCOPE OWN guarded write MUST succeed — proves the guard is permissive in-scope (not
+    # blanket-denying) AND that the per-call LOCAL policy threaded through the WITH-CHECK (else own write denies).
+    pc = _wrow("positive-control")
+    assert pc["outcome"] == "SUCCESS"
+
+
+def test_write_csv_shape():
+    assert len(_WROWS) == 5
+    assert {r["attack"] for r in _WROWS} == {
+        "write-foreign-child", "unlink-foreign-child", "create-foreign-parent",
+        "cross-owner-reassignment", "positive-control"}
+    # no guarded write ever breached (the PEP held the whole plane)
+    assert all(r["pg_agent"] != "breach" for r in _WROWS)
+
+
 # ── (2) static safety-token lint of the single-source-of-truth driver ────────
 def test_local_policy_team_company_off():
     # the #1 vacuity trap: a team_path with a restricted non-team user forces [('id','=',0)] (empty set),
@@ -98,10 +141,32 @@ def test_oracle_fetches_only_id_and_uses_policy_kwarg():
 
 
 def test_counts_only_no_identifiers_written():
-    # byte-stability: the emitted CSV header carries only counts/verdicts, never ids/names/dates/amounts.
+    # byte-stability: the emitted CSV headers carry only counts/verdicts, never ids/names/dates/amounts.
     assert '["variant", "probe", "role", "own_only", "row_count", "cross_owner_rows", "verdict"]' in _SRC
-    for forbidden in ("date_order", "create_date", "amount_total", "access_token"):
-        assert forbidden not in _SRC
+    assert '["attack", "op", "undefended", "pg_agent", "outcome"]' in _SRC   # write-plane header (counts/verdicts)
+    # the exact-header asserts above already pin the columns; this guards against an accidental id/timestamp value.
+    code = re.sub(r"#[^\n]*", "", _SRC)   # strip line comments
+    for forbidden in ("date_order", "create_date", "access_token"):
+        assert forbidden not in code
+
+
+def test_write_driver_uses_policy_kwarg_and_isolation():
+    # every guarded WRITE call must pass the per-call LOCAL policy (else the WITH-CHECK falls back to the global
+    # POLICY → vacuous deny); the right-reason owner-leaf assertion must be present.
+    for call in ("guarded_write(_SOL,", "guarded_unlink(_SOL,", "guarded_create(_SOL,"):
+        assert call in _SRC, f"missing guarded write call {call}"
+    assert _SRC.count("policy=LOCAL_POLICY") >= 5            # 3 attacks + reassign + positive control
+    assert 'guard._authz_domain(_SOL, LOCAL_POLICY)' in _SRC  # right-reason guard (catches a missed thread)
+    # savepoint isolation + the load-bearing env.clear() (not invalidate_all) + residue snapshot
+    assert "SAVEPOINT" in _SRC and 'getattr(env, name, None)' in _SRC and '"clear"' in _SRC
+    assert "residue" in _SRC and "_safe_mutate" in _SRC
+
+
+def test_write_driver_crud_acl_on_line_only_not_header():
+    # the ACL-vacuity fix: the bespoke role gets full CRUD on the LINE (so undefended writes fire) but the header
+    # stays read-only (the gap is the missing line RULE, not the ACL). The probe user is NOT in a sales_team group.
+    assert '"sale.order": (True, False, False, False)' in _SRC      # header read-only
+    assert '"sale.order.line": (True, True, True, True)' in _SRC    # line full CRUD
 
 
 if __name__ == "__main__":

@@ -61,43 +61,78 @@ def _cross_owner(env, ids, owner_id):
     return sum(1 for ln in lines if ln.order_id.user_id.id != owner_id)
 
 
-def real_schema_run(env, outdir="results/repro"):
-    Comp = env["res.company"].sudo()
-    company = env.company or Comp.search([], limit=1)
+# ── savepoint isolation (replicated from evaluation_script.py — driver is standalone, must NOT import it) ──
+def _reset_orm(env):
+    """Drop the ORM cache AND the pending-write/recompute queues after a raw savepoint rollback. `env.clear()`
+    is load-bearing: a bare `invalidate_all()` leaves the rolled-back mutation in `env.all.towrite`, which Odoo
+    re-flushes on the next query (here with REAL stored computes, e.g. sale.order.amount_total) — silently
+    re-applying a change we undid. `clear()` drops towrite + tocompute + cache."""
+    for name in ("clear", "invalidate_all"):
+        fn = getattr(env, name, None)
+        if callable(fn):
+            fn()
+            return
 
-    # ── master data (none exists under --without-demo=all) ───────────────────────
+
+def _isolated(env, fn):
+    """Run `fn` inside a per-attack savepoint, then roll it back + reset the ORM so the mutation leaves NO residue."""
+    env.cr.execute("SAVEPOINT rs")
+    try:
+        return fn()
+    finally:
+        env.cr.execute("ROLLBACK TO SAVEPOINT rs")
+        env.cr.execute("RELEASE SAVEPOINT rs")
+        _reset_orm(env)
+
+
+def _safe_mutate(env, fn):
+    """Attempt one mutation under a defensive savepoint: a raised denial (AccessError) is rolled back so it
+    cannot poison the outer transaction; a success is kept so the sudo breach oracle can read its DB effect.
+    The guarded deny path returns a value (no raise) and simply does not mutate."""
+    env.cr.execute("SAVEPOINT rs_op")
+    try:
+        fn()
+    except Exception:
+        env.cr.execute("ROLLBACK TO SAVEPOINT rs_op")
+        return
+    env.cr.execute("RELEASE SAVEPOINT rs_op")
+
+
+def _seed(env):
+    """Shared fixtures for the read (§5.6) and write planes. Idempotent. Returns (company, partner, product, a, b,
+    grp). The bespoke role models the confused-deputy misconfiguration: Odoo 19's `sale` ships PAIRED rules ("Own
+    Documents Only" governs BOTH sale.order and sale.order.line), so the shipped roles have NO gap; the realistic
+    gap is a BESPOKE role that can READ+manage lines and scopes the parent by salesperson but FORGETS the
+    line-level rule. We grant the role read-ACL on the header and FULL CRUD on the LINE (manage lines) + a parent
+    own-rule + NO child rule; the probe user is in this group ONLY (not in any sales_team.* group), so the shipped
+    child rules never apply to it."""
+    company = env.company or env["res.company"].sudo().search([], limit=1)
     partner = env["res.partner"].sudo().search([("name", "=", "RS-Partner")], limit=1) \
         or env["res.partner"].sudo().create({"name": "RS-Partner", "company_id": company.id})
     product = env["product.product"].sudo().search([("name", "=", "RS-Product")], limit=1) \
         or env["product.product"].sudo().create({"name": "RS-Product", "type": "consu", "list_price": 100.0})
 
-    # Custom restricted role = the confused-deputy misconfiguration. Odoo 19's `sale` ships PAIRED rules
-    # ("Own Documents Only" governs BOTH sale.order and sale.order.line; "All Documents" opens both), so the
-    # shipped sale groups have NO gap. The realistic gap is a BESPOKE role that grants READ on orders+lines and
-    # scopes the parent by salesperson, but FORGETS the line-level rule. We model that exactly: a custom group
-    # with read-ACL on both models + a parent own-rule + NO child rule. The probe user is in this group ONLY
-    # (NOT in any `sales_team.*` group), so the shipped child rules do not apply to it.
     grp = env["res.groups"].sudo().search([("name", "=", "RS Restricted Salesperson")], limit=1)
     if not grp:
         grp = env["res.groups"].sudo().create({"name": "RS Restricted Salesperson"})
-    Access = env["ir.model.access"].sudo()
-    for m in ("sale.order", "sale.order.line"):           # READ-only ACL for the bespoke role
-        if not Access.search_count([("name", "=", "rs_read_" + m), ("group_id", "=", grp.id)]):
-            Access.create({"name": "rs_read_" + m, "model_id": env["ir.model"]._get(m).id,
-                           "group_id": grp.id, "perm_read": True,
-                           "perm_write": False, "perm_create": False, "perm_unlink": False})
+    access = env["ir.model.access"].sudo()
+    # header read-only; LINE full CRUD (read+write+create+unlink) — the "manage lines" grant that makes the
+    # confused-deputy WRITE fire undefended (the line record-rule is the forgotten piece, not the ACL).
+    grants = {"sale.order": (True, False, False, False),
+              "sale.order.line": (True, True, True, True)}
+    for m, (r, w, c, u) in grants.items():
+        name = "rs_acl_" + m
+        if not access.search_count([("name", "=", name), ("group_id", "=", grp.id)]):
+            access.create({"name": name, "model_id": env["ir.model"]._get(m).id, "group_id": grp.id,
+                           "perm_read": r, "perm_write": w, "perm_create": c, "perm_unlink": u})
 
-    # Probe user A: ONLY base internal + the bespoke role + see-all-by-TEAM (so the guard uses the OWNER axis,
-    # not team) + own-only at the OWNER axis. NOT in any sales_team group; NOT admin.
     a = _user(env, "rs_sales_a", "RS Salesperson A", company,
               ["base.group_user", "pco_core_mock.group_team_view_all", "pg_agent_guard.group_pep_own_only"])
     a.sudo().write({_grpfield(env): [(4, grp.id)]})
-    # User B: just another order owner (never reads); plain internal user.
     b = _user(env, "rs_sales_b", "RS Salesperson B", company, ["base.group_user"])
 
-    # ── seed DRAFT orders: 3 per salesperson × 2 lines = 12 lines (6 per owner) ──
     SO = env["sale.order"].sudo()
-    if SO.search_count([("partner_id", "=", partner.id)]) < 6:
+    if SO.search_count([("partner_id", "=", partner.id)]) < 6:    # 3 DRAFT orders/owner × 2 lines = 12 (6/owner)
         for owner in (a, b):
             for _ in range(3):
                 SO.create({
@@ -105,19 +140,21 @@ def real_schema_run(env, outdir="results/repro"):
                     "order_line": [(0, 0, {"product_id": product.id, "product_uom_qty": 1}) for _ in range(2)],
                 })
 
-    # parent OWN rule on sale.order for the restricted group; NO rule on sale.order.line (the deliberate gap).
+    # parent OWN rule on sale.order for the bespoke group; NO rule on sale.order.line (the deliberate gap).
     if not env["ir.rule"].sudo().search_count([("name", "=", "RS own sale orders")]):
         env["ir.rule"].sudo().create({
-            "name": "RS own sale orders",
-            "model_id": env["ir.model"]._get("sale.order").id,
-            "groups": [(6, 0, [grp.id])],
-            "domain_force": "[('user_id', '=', user.id)]",
+            "name": "RS own sale orders", "model_id": env["ir.model"]._get("sale.order").id,
+            "groups": [(6, 0, [grp.id])], "domain_force": "[('user_id', '=', user.id)]",
             "perm_read": True, "perm_write": False, "perm_create": False, "perm_unlink": False,
         })
-
-    # ── probes as the restricted user A (the PEP runs in A's env) ─────────────────
     assert not (a.has_group("base.group_system") or a.has_group("base.group_erp_manager")), \
         "probe user must NOT be admin (would bypass record rules -> vacuous run)"
+    return company, partner, product, a, b, grp
+
+
+def real_schema_run(env, outdir="results/repro"):
+    _company, partner, _product, a, _b, _grp = _seed(env)
+    SO = env["sale.order"].sudo()
     penv = env(user=a.id)
     guard = penv["pg.agent.guard"]
 
@@ -167,5 +204,117 @@ def real_schema_run(env, outdir="results/repro"):
     assert ctl_ok, "CONTROL-FAIL: parent rule not binding (probe user too privileged) — run invalid"
     assert ug_leak and ug_cross == 6, f"gap not reproduced on real schema (cross-owner={ug_cross})"
     assert g_cross == 0 and len(g_ids) == 6, f"PEP did not close the gap (guarded cross={g_cross}, n={len(g_ids)})"
+    print(f"Wrote {out} (counts/verdicts only; byte-stable)\n")
+    return rows
+
+
+# Sentinels for the write-foreign-child oracle. `name` (Description) is store=True/readonly=False and NO
+# sale.order compute depends on order_line.name (so a direct write sticks + dirties no parent → cleanest,
+# recompute-free oracle). Never written to the CSV (byte-stability).
+_FOREIGN_SENTINEL = "WA-FOREIGN-SENTINEL"
+_OWN_SENTINEL = "WA-OWN-SENTINEL"
+
+
+_SOL = "sale.order.line"
+
+
+def _attempt(env, mutate, breach_check):
+    """One isolated attempt: SAVEPOINT → mutate (defensively) → evaluate the breach oracle BEFORE rollback.
+    `breach_check` is a 0-arg callable returning bool (pure-SQL sudo count, cache-independent, never the guard's
+    verdict). The savepoint is always rolled back → no residue."""
+    return _isolated(env, lambda: (_safe_mutate(env, mutate), breach_check())[1])
+
+
+def real_schema_write_run(env, outdir="results/repro"):
+    """Write plane (§5.6 extension / RQ10 on the real schema): a bespoke role that can MANAGE lines (CRUD ACL)
+    but whose line-level rule was forgotten can create/write/unlink/reassign ANOTHER salesperson's order lines
+    (confused-deputy WRITE). The same PEP write-check (USING + WITH-CHECK) holds all of them, while the in-scope
+    OWN write still succeeds (positive control). Every attempt is savepoint-isolated; the DB is left untouched."""
+    _company, partner, product, a, b, _grp = _seed(env)
+    SOL = env[_SOL].sudo()
+    SO = env["sale.order"].sudo()
+    penv = env(user=a.id)
+    guard = penv["pg.agent.guard"]
+
+    # right-reason guard: the guarded owner leaf must be exactly one owner predicate. A missed policy-thread would
+    # make _vals_in_authz fall back to the global POLICY (which lacks sale.order.line) and deny for the WRONG
+    # reason = vacuous "held"; the positive control below also catches that (an own write would vacuously deny).
+    authz = guard._authz_domain(_SOL, LOCAL_POLICY)
+    assert authz == [("order_id.user_id", "=", a.id)], f"guarded owner leaf wrong: {authz}"
+
+    b_order = SO.search([("user_id", "=", b.id)], order="id", limit=1)
+    b_line = SOL.search([("order_id.user_id", "=", b.id)], order="id", limit=1)
+    a_line = SOL.search([("order_id.user_id", "=", a.id)], order="id", limit=1)
+    n_before = SOL.search_count([("order_id.partner_id", "=", partner.id)])
+
+    gone = lambda lid: SOL.search_count([("id", "=", lid)]) == 0
+    has_name = lambda lid, s: SOL.search_count([("id", "=", lid), ("name", "=", s)]) > 0
+    added = lambda oid: SOL.search_count([("order_id", "=", oid)]) > 2     # B's order seeds 2 lines
+    moved = lambda lid: SOL.search_count([("id", "=", lid), ("order_id.user_id", "!=", a.id)]) > 0
+    cvals = {"order_id": b_order.id, "product_id": product.id, "product_uom_qty": 1}
+
+    # each row: (attack_id, op, undefended_mutate, guarded_mutate, breach_check)
+    attacks = [
+        ("write-foreign-child", "write",
+         lambda: penv[_SOL].browse(b_line.id).write({"name": _FOREIGN_SENTINEL}),
+         lambda: guard.guarded_write(_SOL, [b_line.id], {"name": _FOREIGN_SENTINEL}, policy=LOCAL_POLICY),
+         lambda: has_name(b_line.id, _FOREIGN_SENTINEL)),
+        ("unlink-foreign-child", "unlink",
+         lambda: penv[_SOL].browse(b_line.id).unlink(),
+         lambda: guard.guarded_unlink(_SOL, [b_line.id], policy=LOCAL_POLICY),
+         lambda: gone(b_line.id)),
+        ("create-foreign-parent", "create",
+         lambda: penv[_SOL].create(dict(cvals)),
+         lambda: guard.guarded_create(_SOL, dict(cvals), policy=LOCAL_POLICY),
+         lambda: added(b_order.id)),
+        ("cross-owner-reassignment", "write",
+         lambda: penv[_SOL].browse(a_line.id).write({"order_id": b_order.id}),
+         lambda: guard.guarded_write(_SOL, [a_line.id], {"order_id": b_order.id}, policy=LOCAL_POLICY),
+         lambda: moved(a_line.id)),
+    ]
+
+    results = []   # (attack_id, op, undef_breach, guard_breach)
+    for aid, op, undef_fn, guard_fn, check in attacks:
+        ub = _attempt(env, undef_fn, check)
+        gb = _attempt(env, guard_fn, check)
+        results.append((aid, op, ub, gb))
+
+    # positive control: A's OWN line, guarded write MUST SUCCEED (guard is permissive in-scope, not blanket-deny).
+    pc_ok = _attempt(env, lambda: guard.guarded_write(_SOL, [a_line.id], {"name": _OWN_SENTINEL}, policy=LOCAL_POLICY),
+                     lambda: has_name(a_line.id, _OWN_SENTINEL))
+
+    # residue snapshot: every savepoint rolled back -> DB bit-for-bit back to seed.
+    after_lines = SOL.search_count([("order_id.partner_id", "=", partner.id)])
+    after_orders = SO.search_count([("partner_id", "=", partner.id)])
+    sentinel_rows = SOL.search_count(["|", ("name", "=", _FOREIGN_SENTINEL), ("name", "=", _OWN_SENTINEL)])
+    assert after_lines == n_before == 12 and after_orders == 6 and sentinel_rows == 0, \
+        f"write residue (savepoint isolation broke): lines {after_lines} orders {after_orders} sentinel {sentinel_rows}"
+
+    rows = []
+    print("\n=== Real-Odoo-schema WRITE plane (sale.order.line; owner axis) ===")
+    for aid, op, ub, gb in results:
+        outcome = "held" if (ub and not gb) else ("RESIDUAL-LEAK" if gb else "n/a-native-block")
+        rows.append([aid, op, "breach" if ub else "denied", "breach" if gb else "denied", outcome])
+        print(f"  {aid:<26} {op:<7} undefended={'breach' if ub else 'denied'} "
+              f"pg_agent={'breach' if gb else 'denied'} -> {outcome}")
+    rows.append(["positive-control", "write", "na", "na", "SUCCESS" if pc_ok else "CONTROL-FAIL"])
+    print(f"  {'positive-control':<26} {'write':<7} OWN guarded write -> {'SUCCESS' if pc_ok else 'CONTROL-FAIL'}")
+
+    out = os.path.join(outdir, "real_sale_write.csv")
+    os.makedirs(outdir, exist_ok=True)
+    with open(out, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh, lineterminator="\n")
+        w.writerow(["attack", "op", "undefended", "pg_agent", "outcome"])
+        w.writerows(rows)
+
+    # Honest invariants. On real Odoo, a foreign FIELD-overwrite (write-foreign-child) is incidentally blocked by
+    # Odoo's parent-read coupling (writing a line whose parent order A cannot read raises AccessError) — so it does
+    # NOT breach; the structural writes (unlink/create/reassign) DO breach and the PEP holds them. Require >=3
+    # undefended breaches (non-vacuity) + every breaching attack held + the positive control.
+    breached = [r for r in results if r[2]]
+    assert len(breached) >= 3, f"write plane vacuous: only {len(breached)} undefended breach(es)"
+    for aid, op, ub, gb in results:
+        assert not gb, f"{aid}: PEP write-check FAILED to hold (guarded breach)"
+    assert pc_ok, "positive control FAILED: in-scope OWN guarded write did not succeed (guard blanket-denying?)"
     print(f"Wrote {out} (counts/verdicts only; byte-stable)\n")
     return rows

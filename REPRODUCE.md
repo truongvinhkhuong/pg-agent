@@ -55,7 +55,7 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 | 5.3 | emit + verify | `emit_classify(env)` | `results/scale/emit.csv` | scale |
 | 5.3.1 | soundness frontier 1/5→3/5 | `soundness_report(env)` | `results/scale/soundness.csv` | **scale (env-sensitive)** |
 | 5.5 | cross-engine RLS gap+fix (RQ9) | `make rls` (`tools/rls_probe.sh`) | `results/rls.csv` | **opt-in (db-only, byte-stable)** |
-| 5.6 | real-Odoo-schema enforcement | `make real-sale` (`tools/real_schema.sh`, installs `sale`) | `results/real_sale.csv` | **opt-in (byte-stable)** |
+| 5.6 | real-Odoo-schema enforcement (read + write) | `make real-sale` (`tools/real_schema.sh`, installs `sale`) | `results/real_sale.csv` + `real_sale_write.csv` | **opt-in (byte-stable)** |
 | 5.4 | ABAC/ReBAC round-trip (RQ7) | `policy_model(env)` | `results/policy_model.csv` | reproduce-all |
 | 6.1 / 6.2 | integrity (RQ6) | `integrity(env)` ; `integrity_formula(env)` | `results/integrity*.csv` | reproduce-all |
 | 7 | Doc-RAG plane (RQ8) | `docrag(env)` | `results/docrag.csv` | reproduce-all |
@@ -81,9 +81,11 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 - **§5.3.1** the soundness theorem lifts emit 1/5 → 3/5 (4/6 on the Sales-app scan).
 - **§5.5** Postgres RLS, as `app_user`: V-native child read leaks 12 rows / 6 cross-tenant (LEAK); the
   pushdown policy → 6 rows / 0 cross-tenant (SAFE); both positive controls `CONTROL-OK` (parent count 3<6).
-- **§5.6** real Odoo `sale.order.line` (bespoke restricted role, owner axis): V-native child read leaks 12 lines /
-  6 cross-owner (LEAK); the PEP owner-pushdown → 6 lines / 0 cross-owner (SAFE); positive control `CONTROL-OK`
-  (parent count 3<6 = the rule binds, run non-bypassing).
+- **§5.6** real Odoo `sale.order.line` (bespoke restricted role, owner axis): READ — V-native child read leaks
+  12 lines / 6 cross-owner (LEAK); the PEP owner-pushdown → 6 lines / 0 cross-owner (SAFE); positive control
+  `CONTROL-OK` (parent count 3<6 = the rule binds, run non-bypassing). WRITE — 3 structural confused-deputy
+  mutations (unlink/create/reassign) breach undefended and the write-check holds all 3 (`held`); an own guarded
+  write succeeds (`SUCCESS`); a foreign field-overwrite is natively blocked by Odoo (reported, not an enforcement claim).
 - **§10.1.1** real-LLM pooled ASR-without-guard **0.377** (26/69, Wilson 95% CI [0.272, 0.495]), **guarded 0/72**
   across 4 models / 2 providers (see caveats).
 - **§10.1.2** indirect / tool-output injection (real 2-turn, poisoned RAG/ERP-note): **7/20** probes induced a

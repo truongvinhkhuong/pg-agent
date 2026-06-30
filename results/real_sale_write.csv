@@ -1,0 +1,6 @@
+attack,op,undefended,pg_agent,outcome
+write-foreign-child,write,denied,denied,n/a-native-block
+unlink-foreign-child,unlink,breach,denied,held
+create-foreign-parent,create,breach,denied,held
+cross-owner-reassignment,write,breach,denied,held
+positive-control,write,na,na,SUCCESS
