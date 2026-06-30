@@ -815,7 +815,9 @@ framing: \emph{``Policy-Closure Compilation for Row-Level Authorization in ERP L
         (\S10.1.3: authorized confidential values survive the output-validator in $\sim$50\% of paraphrase forms),
         still not closed. \S10.1.3 also measures the \textbf{temperature/seed variance} of the \S10.1.1 ASR
         (stable, mean 0.36--0.40 @ temp 0.7) and the \textbf{real integrity wrong-number rate} (models mis-compute
-        $\sim$half; verifier catches 0.50--0.67). Remaining: real \textbf{embedding-RAG} rate (the \S7 ranker is lexical).
+        $\sim$half; verifier catches 0.50--0.67). The \textbf{real embedding-RAG} surfacing is now also measured
+        (\S10.1.4: a VoyageAI \code{voyage-3.5} retriever surfaces 78 cross-team/confidential chunks undefended ---
+        incl. 8/8 via a semantic query the lexical ranker misses --- the delivery-time PEP drops all $\to$ guarded 0).
   \item \textbf{Real-schema enforcement is owner-axis / single-company (\S5.6):} the PEP is now shown on the
         \textbf{real, unmodified upstream Odoo \code{sale.order}/\code{sale.order.line}} (not just the synthetic
         mock) for \textbf{both} the read plane (12/6 $\to$ 6/0) \textbf{and} the write plane (3 structural
@@ -1015,6 +1017,39 @@ residual is NOT a guard/PEP leak (the PEP never returned this value unauthorized
 residual lives in the answer channel, §4.3/§7). We SIZE the named residual; we do NOT close it. The only invariant
 asserted is guarded leak 0; every stochastic number is a finding (WARN where unexercised). Byte-stable
 \code{results/llm/reliability.csv}; offline calibration \code{tests/test\_llm\_reliability.py}.
+
+\subsubsection{Real-embedding Doc-RAG surfacing (external validity, not a new claim).}
+\S7 proves the retrieval-plane PEP drops unauthorized chunks + masks confidential spans, but its ranker is a
+deterministic \textbf{lexical} stand-in. We replace it with a \textbf{real production embedding retriever}
+(VoyageAI \code{voyage-3.5}, OpenAI \code{text-embedding-3-small} fallback) over the SAME seed=42 corpus (32 chunks,
+persona \code{ttv}), measure the \emph{undefended} surfacing, then route the identical candidate list through the
+PEP. Phase-1 (\code{tools/docrag\_embed.py}) embeds + cosine-ranks on the host and commits the ranking keyed by the
+install-stable order \code{name}; Phase-2 replays it (byte-stable).
+
+\begin{center}\small
+\begin{tabular}{@{}llcc@{}}
+\toprule
+query & kind & undefended unauth/conf & with PEP \\
+\midrule
+team-token (ttf) direct        & cross-team-direct      & 8/8  & \textbf{0/0} \\
+generic terms                  & cross-team-incidental  & \textbf{10}/12 & \textbf{0/0} \\
+own-team                       & confidential           & 4/8  & \textbf{0/0} \\
+own-team (positive control)    & utility                & 4/8  & \textbf{0/0} (name verbatim) \\
+\textbf{large-value, no team token} & \textbf{semantic-crossteam} & \textbf{8/8} & \textbf{0/0} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The facts (\code{voyage-3.5}): a real embedder reproduces the lexical surfacing on team-token queries and surfaces
+\textbf{more} on the generic one (\textbf{10}/12 cross-team vs lexical's 8); the \textbf{team-token-free semantic
+query} (``hợp đồng giá trị lớn'', large-value contracts) pulls \textbf{8/8 cross-team} chunks by \emph{amount}
+similarity --- a surfacing the term-overlap lexical ranker \textbf{cannot reach} --- so the stand-in was if anything
+conservative; and through the delivery-time PEP \textbf{every query is 0/0 with 0 false-block} (authorized chunks
+survive, public \code{name} verbatim). \textbf{Anti-claim:} the embedder is \textbf{security-irrelevant} ---
+\code{guarded\_retrieve} is ranker-independent, so guarded 0 holds for ANY retriever (\S7 is the proof). This adds
+external validity + a measured undefended rate, NOT a new security property; we do NOT claim Voyage is safer than
+lexical. Phase-1 is opt-in / not byte-reproducible (provider floats); byte-stability = the committed ranking.
+Provider recorded per row.
 
 \subsection{Private validation (corroborating, not reproducible)}
 Because the guard rewrites the query domain \textbf{below the LLM trust boundary} --- the model only emits ORM

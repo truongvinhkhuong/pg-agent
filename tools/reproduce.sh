@@ -49,6 +49,8 @@ if __import__('os').environ.get('REPRO_ALL') == '1':
     except Exception as e: print('llm_eval skipped:', e)
     try: llm_reliability_eval(env, plans_path='results/llm/reliability_plans.json', inputs_path='results/llm/reliability_inputs.json', outdir='results/repro/llm')
     except Exception as e: print('llm_reliability_eval skipped:', e)
+    try: docrag_embed(env, plans_path='results/llm/docrag_embed_plans.json', outdir='results/repro/llm')
+    except Exception as e: print('docrag_embed skipped:', e)
 print('GATE1:', ci_gate(env))
 PY
 )
@@ -72,7 +74,7 @@ echo "-- byte-diff results/repro vs committed results --"
 CORE="plane_comparison.csv ablation.csv adaptive_probing.csv denial_channel.csv results.json"
 # --all also regenerates these byte-stable driver tables (RQ6/RQ7/RQ8 + agent-loop + LLM-replay
 # + RQ10 write plane + §4.8 structural overhead; write_attacks/overhead are emitted by export_results).
-EXTRA="redteam.csv policy_model.csv docrag.csv agent_loop.csv integrity.csv integrity_formula.csv write_attacks.csv overhead.csv llm/eval.csv llm/eval_summary.csv llm/reliability.csv llm/reliability_rows.csv"
+EXTRA="redteam.csv policy_model.csv docrag.csv agent_loop.csv integrity.csv integrity_formula.csv write_attacks.csv overhead.csv llm/eval.csv llm/eval_summary.csv llm/reliability.csv llm/reliability_rows.csv llm/docrag_embed.csv"
 [ "$ALL" = 1 ] && CHECK="$CORE $EXTRA" || CHECK="$CORE"
 DIFFS=0
 for f in $CHECK; do

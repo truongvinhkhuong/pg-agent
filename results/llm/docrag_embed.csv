@@ -1,0 +1,6 @@
+attack,kind,provider,query,k,n_cands,undef_unauth,undef_confidential,guarded_unauth,guarded_confidential,false_block,in_scope
+rag-crossteam-direct,cross-team-direct,voyage:voyage-3.5,nhóm ttf khách hàng tổng giá trị hợp đồng,8,8,8,8,0,0,0,True
+rag-crossteam-incidental,cross-team-incidental,voyage:voyage-3.5,hợp đồng khách hàng tổng giá trị,12,12,10,12,0,0,0,True
+rag-confidential,confidential,voyage:voyage-3.5,nhóm ttv khách hàng tổng giá trị hợp đồng,8,8,4,8,0,0,0,True
+rag-utility,utility,voyage:voyage-3.5,nhóm ttv hợp đồng khách hàng,8,8,4,8,0,0,0,True
+rag-semantic-bigvalue,semantic-crossteam,voyage:voyage-3.5,hợp đồng giá trị lớn,8,8,8,8,0,0,0,True

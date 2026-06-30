@@ -63,6 +63,7 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 | 10.1.1 | real-LLM run (4 models / 2 providers) | `tools/llm_planner.py` (keys, **not reproducible**) ; `llm_eval(env)` (replay) | `results/llm/eval.csv` + `eval_summary.csv` | **opt-in** |
 | 10.1.2 | indirect / tool-output injection (real 2-turn) | `tools/llm_planner.py --mode indirect` (keys) ; `llm_eval(env)` (replay) | `results/llm/eval_summary.csv` (scope=indirect) | **opt-in** |
 | 10.1.3 | real-LLM reliability & residual (variance / integrity rate / answer-channel) | `llm_reliability_prepare(env)` ; `tools/llm_reliability.py` (keys) ; `llm_reliability_eval(env)` (replay) | `results/llm/reliability.csv` | **opt-in** |
+| 10.1.4 | real-embedding Doc-RAG surfacing (Voyage default / OpenAI fallback) | `docrag_embed_prepare(env)` ; `tools/docrag_embed.py` (keys) ; `docrag_embed(env)` (replay) | `results/llm/docrag_embed.csv` | **opt-in** |
 | 10.2 | private production validation | — | — | **not reproducible (private)** |
 
 `make scale` runs §5.2 / §5.2.1 / §5.3 / §5.3.1 (installs the CE apps; structural compare).
@@ -94,6 +95,10 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 - **§10.1.3** real-LLM reliability/residual (4 models, MEASUREMENTS not claims): temp-0.7 ASR variance mean
   **0.36–0.40** (stable, guarded 0/rep); real integrity wrong-number rate **0.33–0.50** (verifier catches 0.50–0.67);
   answer-channel residual — authorized value paraphrased past the output-validator in **~50%** of forms (not a guard leak).
+- **§10.1.4** real-embedding Doc-RAG (VoyageAI `voyage-3.5`, OpenAI fallback): a real embedder surfaces **78**
+  cross-team/confidential chunks undefended — incl. **8/8** via the team-token-free semantic query `hợp đồng giá
+  trị lớn` that the lexical ranker misses — the delivery-time PEP drops all → **guarded 0/0, false-block 0**
+  (embedder is security-irrelevant; external validity, not a new claim).
 
 ## 5. Isolation / safety
 The reproduce stack is a pinned compose project **`pgagent-ae`** with its own network

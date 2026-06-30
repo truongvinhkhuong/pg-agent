@@ -1,0 +1,210 @@
+{
+  "meta": {
+    "model": "pco.sale.order",
+    "note": "seed=42 deterministic corpus; key=name; for tools/docrag_embed.py"
+  },
+  "corpus": [
+    {
+      "key": "SO-00001",
+      "source_team": "ttv",
+      "text": "Hợp đồng SO-00001 — nhóm ttv, khách hàng KH-TTV-002, tổng giá trị 255200000 VND."
+    },
+    {
+      "key": "SO-00002",
+      "source_team": "ttv",
+      "text": "Hợp đồng SO-00002 — nhóm ttv, khách hàng KH-TTV-046, tổng giá trị 611600000 VND."
+    },
+    {
+      "key": "SO-00003",
+      "source_team": "ttv",
+      "text": "Hợp đồng SO-00003 — nhóm ttv, khách hàng KH-TTV-047, tổng giá trị 1246300000 VND."
+    },
+    {
+      "key": "SO-00004",
+      "source_team": "ttv",
+      "text": "Hợp đồng SO-00004 — nhóm ttv, khách hàng KH-TTV-018, tổng giá trị 1576300000 VND."
+    },
+    {
+      "key": "SO-00005",
+      "source_team": "ttv",
+      "text": "Hợp đồng SO-00005 — nhóm ttv, khách hàng KH-TTV-026, tổng giá trị 534600000 VND."
+    },
+    {
+      "key": "SO-00006",
+      "source_team": "ttv",
+      "text": "Hợp đồng SO-00006 — nhóm ttv, khách hàng KH-TTV-024, tổng giá trị 199100000 VND."
+    },
+    {
+      "key": "SO-00007",
+      "source_team": "ttv",
+      "text": "Hợp đồng SO-00007 — nhóm ttv, khách hàng KH-TTV-044, tổng giá trị 1211100000 VND."
+    },
+    {
+      "key": "SO-00008",
+      "source_team": "ttv",
+      "text": "Hợp đồng SO-00008 — nhóm ttv, khách hàng KH-TTV-032, tổng giá trị 105600000 VND."
+    },
+    {
+      "key": "SO-00009",
+      "source_team": "ttf",
+      "text": "Hợp đồng SO-00009 — nhóm ttf, khách hàng KH-TTF-006, tổng giá trị 1004300000 VND."
+    },
+    {
+      "key": "SO-00010",
+      "source_team": "ttf",
+      "text": "Hợp đồng SO-00010 — nhóm ttf, khách hàng KH-TTF-022, tổng giá trị 752400000 VND."
+    },
+    {
+      "key": "SO-00011",
+      "source_team": "ttf",
+      "text": "Hợp đồng SO-00011 — nhóm ttf, khách hàng KH-TTF-015, tổng giá trị 48400000 VND."
+    },
+    {
+      "key": "SO-00012",
+      "source_team": "ttf",
+      "text": "Hợp đồng SO-00012 — nhóm ttf, khách hàng KH-TTF-016, tổng giá trị 1387100000 VND."
+    },
+    {
+      "key": "SO-00013",
+      "source_team": "ttf",
+      "text": "Hợp đồng SO-00013 — nhóm ttf, khách hàng KH-TTF-035, tổng giá trị 718300000 VND."
+    },
+    {
+      "key": "SO-00014",
+      "source_team": "ttf",
+      "text": "Hợp đồng SO-00014 — nhóm ttf, khách hàng KH-TTF-025, tổng giá trị 468600000 VND."
+    },
+    {
+      "key": "SO-00015",
+      "source_team": "ttf",
+      "text": "Hợp đồng SO-00015 — nhóm ttf, khách hàng KH-TTF-033, tổng giá trị 33000000 VND."
+    },
+    {
+      "key": "SO-00016",
+      "source_team": "ttf",
+      "text": "Hợp đồng SO-00016 — nhóm ttf, khách hàng KH-TTF-027, tổng giá trị 742500000 VND."
+    },
+    {
+      "key": "SO-00017",
+      "source_team": "ttr",
+      "text": "Hợp đồng SO-00017 — nhóm ttr, khách hàng KH-TTR-009, tổng giá trị 1168200000 VND."
+    },
+    {
+      "key": "SO-00018",
+      "source_team": "ttr",
+      "text": "Hợp đồng SO-00018 — nhóm ttr, khách hàng KH-TTR-008, tổng giá trị 198000000 VND."
+    },
+    {
+      "key": "SO-00019",
+      "source_team": "ttr",
+      "text": "Hợp đồng SO-00019 — nhóm ttr, khách hàng KH-TTR-018, tổng giá trị 24200000 VND."
+    },
+    {
+      "key": "SO-00020",
+      "source_team": "ttr",
+      "text": "Hợp đồng SO-00020 — nhóm ttr, khách hàng KH-TTR-008, tổng giá trị 192500000 VND."
+    },
+    {
+      "key": "SO-00021",
+      "source_team": "ttr",
+      "text": "Hợp đồng SO-00021 — nhóm ttr, khách hàng KH-TTR-043, tổng giá trị 660000000 VND."
+    },
+    {
+      "key": "SO-00022",
+      "source_team": "ttr",
+      "text": "Hợp đồng SO-00022 — nhóm ttr, khách hàng KH-TTR-002, tổng giá trị 623700000 VND."
+    },
+    {
+      "key": "SO-00023",
+      "source_team": "ttr",
+      "text": "Hợp đồng SO-00023 — nhóm ttr, khách hàng KH-TTR-020, tổng giá trị 235400000 VND."
+    },
+    {
+      "key": "SO-00024",
+      "source_team": "ttr",
+      "text": "Hợp đồng SO-00024 — nhóm ttr, khách hàng KH-TTR-038, tổng giá trị 1361800000 VND."
+    },
+    {
+      "key": "SO-00025",
+      "source_team": "ke_toan",
+      "text": "Hợp đồng SO-00025 — nhóm ke_toan, khách hàng KH-KE_TOAN-028, tổng giá trị 484000000 VND."
+    },
+    {
+      "key": "SO-00026",
+      "source_team": "ke_toan",
+      "text": "Hợp đồng SO-00026 — nhóm ke_toan, khách hàng KH-KE_TOAN-043, tổng giá trị 1411300000 VND."
+    },
+    {
+      "key": "SO-00027",
+      "source_team": "ke_toan",
+      "text": "Hợp đồng SO-00027 — nhóm ke_toan, khách hàng KH-KE_TOAN-015, tổng giá trị 715000000 VND."
+    },
+    {
+      "key": "SO-00028",
+      "source_team": "ke_toan",
+      "text": "Hợp đồng SO-00028 — nhóm ke_toan, khách hàng KH-KE_TOAN-042, tổng giá trị 220000000 VND."
+    },
+    {
+      "key": "SO-00029",
+      "source_team": "ke_toan",
+      "text": "Hợp đồng SO-00029 — nhóm ke_toan, khách hàng KH-KE_TOAN-030, tổng giá trị 1369500000 VND."
+    },
+    {
+      "key": "SO-00030",
+      "source_team": "ke_toan",
+      "text": "Hợp đồng SO-00030 — nhóm ke_toan, khách hàng KH-KE_TOAN-050, tổng giá trị 840400000 VND."
+    },
+    {
+      "key": "SO-00031",
+      "source_team": "ke_toan",
+      "text": "Hợp đồng SO-00031 — nhóm ke_toan, khách hàng KH-KE_TOAN-025, tổng giá trị 522500000 VND."
+    },
+    {
+      "key": "SO-00032",
+      "source_team": "ke_toan",
+      "text": "Hợp đồng SO-00032 — nhóm ke_toan, khách hàng KH-KE_TOAN-032, tổng giá trị 591800000 VND."
+    }
+  ],
+  "queries": [
+    {
+      "id": "rag-crossteam-direct",
+      "persona": "ttv",
+      "kind": "cross-team-direct",
+      "query": "nhóm ttf khách hàng tổng giá trị hợp đồng",
+      "k": 8,
+      "in_scope": true
+    },
+    {
+      "id": "rag-crossteam-incidental",
+      "persona": "ttv",
+      "kind": "cross-team-incidental",
+      "query": "hợp đồng khách hàng tổng giá trị",
+      "k": 12,
+      "in_scope": true
+    },
+    {
+      "id": "rag-confidential",
+      "persona": "ttv",
+      "kind": "confidential",
+      "query": "nhóm ttv khách hàng tổng giá trị hợp đồng",
+      "k": 8,
+      "in_scope": true
+    },
+    {
+      "id": "rag-utility",
+      "persona": "ttv",
+      "kind": "utility",
+      "query": "nhóm ttv hợp đồng khách hàng",
+      "k": 8,
+      "in_scope": true
+    },
+    {
+      "id": "rag-semantic-bigvalue",
+      "persona": "ttv",
+      "kind": "semantic-crossteam",
+      "query": "hợp đồng giá trị lớn",
+      "k": 8,
+      "in_scope": true
+    }
+  ]
+}

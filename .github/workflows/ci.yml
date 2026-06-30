@@ -42,6 +42,7 @@ jobs:
           python tests/test_llm_stats.py
           python tests/test_real_schema.py
           python tests/test_llm_reliability.py
+          python tests/test_docrag_embed.py
 
       - name: Secret + raw-data regression gate (detect-secrets via pre-commit)
         run: |
