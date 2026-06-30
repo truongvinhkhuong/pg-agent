@@ -1,0 +1,4 @@
+variant,probe,role,own_only,row_count,cross_owner_rows,verdict
+v-native,parent-control,salesperson,yes,3,0,CONTROL-OK
+v-native,child-direct,salesperson,yes,12,6,LEAK
+v-pep,child-direct,salesperson,yes,6,0,SAFE

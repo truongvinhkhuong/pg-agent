@@ -129,9 +129,15 @@ class PgAgentGuard(models.AbstractModel):
                     masked.add(key)
         return masked
 
-    def _authz_domain(self, model):
-        """List of leaves to AND with the user domain, or None to DENY (fail-closed)."""
-        policy = POLICY.get(model)
+    def _authz_domain(self, model, policy=None):
+        """List of leaves to AND with the user domain, or None to DENY (fail-closed).
+
+        `policy` is an optional per-call policy registry ({model: {team_path/company_path/owner_path}}).
+        When None (every in-tree caller), the module-level POLICY is used — byte-identical behavior. A caller
+        MAY pass a LOCAL registry to enforce on a model that is not in the global POLICY (e.g. a real upstream
+        Odoo model) WITHOUT mutating POLICY (which is consumed by exact-equality/count asserts elsewhere)."""
+        registry = POLICY if policy is None else policy
+        policy = registry.get(model)
         if policy is None:
             return None
 
@@ -156,14 +162,15 @@ class PgAgentGuard(models.AbstractModel):
 
         return leaves
 
-    def _guard(self, model, operation, domain):
+    def _guard(self, model, operation, domain, policy=None):
         """Decide allow/deny + build effective domain. Audits every decision.
 
         Never raises on an authorization decision — the caller turns a deny into a
         uniform empty result (T2.4). The real reason is recorded in the audit log.
+        `policy` (optional) is forwarded to `_authz_domain` for per-call local registries.
         """
         domain = list(domain or [])
-        authz = self._authz_domain(model)
+        authz = self._authz_domain(model, policy)
         if authz is None:
             audit_decision(
                 self.env, model, operation, domain, allowed=False,
@@ -194,9 +201,9 @@ class PgAgentGuard(models.AbstractModel):
 
     # ── Guarded ORM surface (the agent MUST call these, not env[model] directly) ──
     def guarded_search_read(self, model, domain=None, fields=None,
-                            offset=0, limit=None, order=None):
+                            offset=0, limit=None, order=None, policy=None):
         t0 = time.monotonic()
-        dec = self._guard(model, "search_read", domain)
+        dec = self._guard(model, "search_read", domain, policy=policy)
         if not dec.allowed:
             return self._deny("search_read", t0)
         rows = self.env[model].search_read(

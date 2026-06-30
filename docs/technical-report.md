@@ -31,7 +31,9 @@ retrieval plane** that delivers chunks only re-rendered from row-authorized, cle
 (vii) show the gap is **paradigm-level, not an Odoo artifact** by reproducing the same relational-traversal leak
 and the same predicate-pushdown fix on a second engine, **PostgreSQL RLS** (RQ9); and (viii) extend the threat
 model to **mutations** — a forced write-check (USING + WITH-CHECK) closes the confused-deputy *write* gap on
-create/write/unlink (RQ10), 12/12 breaching writes held.
+create/write/unlink (RQ10), 12/12 breaching writes held; and (ix) **enforce on the real schema** — the same guard
+closes the scanner-predicted gap on **unmodified upstream Odoo `sale.order`/`sale.order.line`** (not just the
+synthetic mock), read plane, 12/6 → 6/0 with a binding positive control (§5.6).
 
 The contribution is scoped honestly to **applied security + benchmark + reference implementation** for an
 under-served setting (ERP record-rule governance that is incomplete on child models), not to a novel
@@ -500,6 +502,47 @@ One schema, one engine version, two tenants. Fully reproducible and byte-stable:
 credentials) and byte-diffs it; the offline `tests/test_rls_model.py` calibrates the verdict invariants + the
 positive control + a static safety-token lint of the SQL in CI without Docker.
 
+### 5.6 Real-Odoo-schema enforcement — the PEP closes the gap on unmodified upstream `sale.order` (read plane) · [`results/real_sale.csv`](../results/real_sale.csv)
+
+Every result above runs on the public synthetic `pco_core_mock` — which is, by construction, a faithful copy of
+Odoo's `sale.order` / `sale.order.line`. This subsection removes the mock from the loop: it runs the **same PG-Agent
+PEP guard** against the **real, unmodified upstream Odoo `sale` module** (`make real-sale` installs `sale_management`
+into the isolated stack). The static scanner (§5.2) independently flagged `sale.order.line` (reached via
+`order_id.user_id`) as a relational-traversal gap; here we reproduce the leak and the fix at runtime on that exact
+real model.
+
+Odoo 19's `sale` ships *paired* record rules (the "Own Documents Only" role governs **both** `sale.order` and
+`sale.order.line`), so the shipped roles have no gap. The realistic confused-deputy is a **bespoke role**: a
+deployment grants an agent/role **read** on orders *and* lines and scopes the parent order by salesperson, but —
+the misconfiguration this paper studies — **omits the line-level rule**. We model exactly that: a custom group with
+read-ACL on both models + one parent rule `[('user_id','=',user.id)]` + **no** child rule, and a plain internal
+probe user in that group only (not in any shipped `sales_team.*` group, not admin).
+
+| variant | probe | row_count | cross_owner_rows | verdict |
+|---|---|---|---|---|
+| V-native (no line rule) | parent-control | 3 | 0 | CONTROL-OK |
+| V-native (no line rule) | child-direct | **12** | **6** | **LEAK** |
+| V-pep (forced owner pushdown) | child-direct | **6** | **0** | **SAFE** |
+
+The restricted user sees only its own **3 of 6** orders on the governed parent (the in-band **positive control** —
+proof the rule binds and the run is not privileged/bypassing), yet reads **all 12** order lines directly, 6 of them
+another salesperson's (**LEAK** — the confused-deputy on the real schema). The guard, given a per-model relation
+policy via the additive `policy=` kwarg, forces the parent's owner predicate down the `order_id` FK onto the line
+domain (`[('order_id.user_id','=',uid)]`) → the user's own **6** lines, **0** cross-owner (**SAFE**), with no
+over-blocking.
+
+**Honest framing.** The DATA (partner/product/orders) is synthetic seed, but the **schema, fields, FK relation,
+record-rule engine, and ORM are 100% real upstream Odoo** — this closes the "synthetic mock model only" §9 caveat
+for the read plane. We did **not** manufacture the gap: the scanner flagged it before any rule, and we add exactly
+one realistic parent rule and zero child rules (the same govern-parent-forget-child posture as the mock, now on the
+real model). The leak oracle is **non-circular** (cross-owner measured via sudo on `order_id.user_id`, never the
+guard's verdict). The guard is **unmodified** — the new model is bound through a per-call LOCAL policy, leaving the
+global `POLICY` (and every existing byte-stable result) untouched. Scope: read / owner axis / single company /
+draft orders; company-axis and the write plane on real models are future work. Byte-stable: `make real-sale`
+regenerates [`results/real_sale.csv`](../results/real_sale.csv) (counts/verdicts only — no ids/names/dates) and
+byte-diffs it; `tests/test_real_schema.py` calibrates the invariants + the positive control + a static lint of the
+driver in CI without Docker.
+
 ---
 
 ## 6. Integrity — RQ6 (applied / adopt-not-invent)
@@ -640,8 +683,12 @@ Agents."*
   indirect probes genuinely induced a leaking call). What remains explicitly **out of scope and not closed** is
   the **answer channel**: an injection that makes the model paraphrase, into prose, data it *already legitimately
   holds* (own-team rows) is an output-validation residual (§4.3/§7), not a PEP property. Other future increments:
-  real-Odoo-schema enforcement beyond the synthetic mock, real integrity/RAG hallucination rates, and
-  temperature/seed repetition variance.
+  real integrity/RAG hallucination rates, and temperature/seed repetition variance.
+- **Real-schema enforcement is read / owner axis only (§5.6):** the PEP enforcement is now shown on the **real,
+  unmodified upstream Odoo `sale.order`/`sale.order.line`** (not just the synthetic mock) — closing the long-standing
+  "mock model only" caveat for the read plane, with the in-band positive control proving the run is non-bypassing.
+  Still scoped to the **read plane, owner axis, single company, draft orders**: the company-axis gap and the
+  **write plane** on real models (the §4.7 mutation suite currently runs on the mock) remain future work.
 - **CE gap rate is low per model but endemic across domains (§5.2.1):** standard Odoo is broadly
   company-governed, so per model the gap is rare (15 of 2 072 reachable child×axis pairs, 0.7%); the finding is
   **breadth** — it recurs in 6 of 8 at-risk domains — not a high per-model rate. The headline is the per-domain

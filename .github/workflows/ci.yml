@@ -40,6 +40,7 @@ jobs:
           python tests/test_write_model.py
           python tests/test_overhead.py
           python tests/test_llm_stats.py
+          python tests/test_real_schema.py
 
       - name: Secret + raw-data regression gate (detect-secrets via pre-commit)
         run: |

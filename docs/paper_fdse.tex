@@ -588,6 +588,40 @@ against the isolated stack's \code{postgres:16} (db-only, no Odoo, reads no cred
 \code{tests/test\_rls\_model.py} calibrates the verdict invariants + the positive control + a static
 safety-token lint of the SQL in CI without Docker.
 
+\subsection{Real-Odoo-schema enforcement --- the PEP closes the gap on unmodified \code{sale.order} (read plane)}
+Every result above runs on the public synthetic \code{pco\_core\_mock}, a faithful copy of Odoo's
+\code{sale.order}/\code{sale.order.line}. Here we remove the mock: \code{make real-sale} installs the official
+\code{sale\_management} app and runs the \textbf{same PEP guard} against the \textbf{real, unmodified upstream}
+model the static scanner (\S5.2) flagged. Odoo~19 ships \emph{paired} rules (the ``Own Documents Only'' role
+governs both order and line), so the shipped roles have no gap; the realistic confused-deputy is a \textbf{bespoke
+role} that grants READ on orders+lines and scopes the parent by salesperson but \textbf{omits the line rule}. We
+model exactly that (a custom group: read-ACL on both + one parent rule \code{[('user\_id','=',user.id)]} + NO child
+rule; probe user in that group only, not admin).
+
+\begin{center}\small
+\begin{tabular}{@{}llccc@{}}
+\toprule
+variant & probe & row\_count & cross\_owner & verdict \\
+\midrule
+V-native (no line rule) & parent-control & 3  & 0 & CONTROL-OK \\
+V-native (no line rule) & child-direct   & \textbf{12} & \textbf{6} & \textbf{LEAK} \\
+V-pep (owner pushdown)  & child-direct   & \textbf{6}  & \textbf{0} & \textbf{SAFE} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The restricted user sees only its own \textbf{3 of 6} orders on the governed parent (in-band positive control:
+the run is not privileged), yet reads \textbf{all 12} lines directly, 6 another salesperson's (\textbf{LEAK} on the
+real schema); the guard forces the parent owner predicate down the FK (\code{[('order\_id.user\_id','=',uid)]}) to
+the user's own \textbf{6}, \textbf{0} cross-owner (\textbf{SAFE}). \textbf{Honest framing:} the DATA is synthetic
+seed but the \textbf{schema/fields/FK/rule-engine/ORM are 100\% real upstream Odoo} --- this closes the
+``synthetic-mock-only'' caveat for the read plane; we did NOT manufacture the gap (the scanner flagged it first;
+one realistic parent rule, zero child rules); the oracle is non-circular (sudo on \code{order\_id.user\_id}); the
+guard is \textbf{unmodified} (the model is bound via a per-call LOCAL policy, global \code{POLICY} untouched).
+Scope: read / owner axis / single company / draft; company-axis + write-plane on real models are future work.
+Byte-stable: \code{make real-sale} regenerates \code{results/real\_sale.csv} (counts/verdicts only) + byte-diffs;
+\code{tests/test\_real\_schema.py} calibrates it + the positive control + a driver lint in CI without Docker.
+
 % =====================================================================
 \section{Integrity --- RQ6 (applied / adopt-not-invent)}
 A reliability threat orthogonal to authorization: an LLM agent that retrieves the \emph{right} rows can still
@@ -746,8 +780,12 @@ framing: \emph{``Policy-Closure Compilation for Row-Level Authorization in ERP L
         genuinely induced a leaking call). Explicitly \textbf{out of scope / not closed}: the \textbf{answer
         channel} --- an injection that makes the model paraphrase, into prose, data it \emph{already legitimately
         holds} is an output-validation residual (\S4.3/\S7), not a PEP property. Other future increments:
-        real-Odoo-schema enforcement beyond the synthetic mock, real integrity/RAG hallucination rates, and
-        temperature/seed repetition variance.
+        real integrity/RAG hallucination rates, and temperature/seed repetition variance.
+  \item \textbf{Real-schema enforcement is read / owner axis only (\S5.6):} the PEP is now shown on the
+        \textbf{real, unmodified upstream Odoo \code{sale.order}/\code{sale.order.line}} (not just the synthetic
+        mock), closing the long-standing ``mock-only'' caveat for the read plane with a binding positive control.
+        Still scoped to read / owner axis / single company / draft orders; the company-axis gap and the
+        \textbf{write plane} on real models (the \S4.7 mutation suite runs on the mock) remain future work.
   \item \textbf{CE gap count is modest:} standard Odoo is broadly company-governed; the 5 gaps are real but the
         heavier gap/burden target is the bespoke \code{pco_core} or larger module sets.
   \item \textbf{Emit soundness is bounded but characterized (\S5.3.1):} the conservative gate emits only single
