@@ -1,16 +1,16 @@
 % ---------------------------------------------------------------------------
-% refs.bib — bibliography for paper_fdse.tex (FDSE / Springer splncs04 style).
-% DRAFT, researched 2026-06-29. arXiv IDs / titles / years were web-verified.
-%
-% AUTHOR LISTS marked as {{N. N.}} were NOT in the search snippets and MUST be
-% completed/confirmed before submission. Keys needing author confirmation:
-%   orgaccess, rolecond, policybank, progent, pcas, agentguard, clawguard,
-%   safeflow, deploi, securemcp  (and verify the full author lists of seagent, visionaac).
-% NOT RESOLVED in the prose (now handled): "AgentBound" had no standalone citation
-%   (dropped); "Agent-GrantBox" not found -> replaced by Progent (verified) which
-%   matches the same "least-privilege at the tool/API interface" description.
+% refs.bib -- bibliography for paper_fdse.tex (FDSE / Springer splncs04 style).
+% Author lists VERIFIED against the arXiv API / official venue pages on 2026-06-30
+% (full ordered author lists, no "et al.", no fabrication). Version notes:
+%   - progent (2504.11703): cited with its CURRENT verified title
+%     "Progent: Securing AI Agents with Privilege Control" (retitled in v3).
+%   - pcas (2602.16708): v1/v2 title "Policy Compiler for Secure Agentic Systems"
+%     (source of the "PCAS" name used in the prose; retitled to "Formal Policy
+%     Enforcement for Real-World Agentic Systems" in v3). We cite the v1/v2 title.
+%   - "AgentBound" had no standalone citation (dropped); "Agent-GrantBox" not found
+%     -> Progent (verified, same tool/API least-privilege description).
 % Industry products / standards / model cards are misc-type entries with URLs.
-% (BibTeX has no inline percent-comments inside entries — keep all notes out here.)
+% (BibTeX has no inline percent-comments inside entries -- keep all notes out here.)
 % ---------------------------------------------------------------------------
 
 % ===== Benchmarks (agents / access control) =====
@@ -28,51 +28,51 @@
 }
 @article{orgaccess,
   title  = {{OrgAccess}: A Benchmark for Role-Based Access Control in Organization Scale {LLMs}},
-  author = {{N. N.}},
+  author = {Sanyal, Debdeep and Maharana, Umakanta and Sinha, Yash and Tan, Hong Ming and Karande, Shirish and Kankanhalli, Mohan and Mandal, Murari},
   journal= {arXiv preprint arXiv:2505.19165},
   year   = {2025}
 }
 @article{rolecond,
   title  = {Role-Conditioned Refusals: Evaluating Access Control Reasoning in Large Language Models},
-  author = {{N. N.}},
+  author = {Klisura, {\DJ}or{\dj}e and Khoury, Joseph and Kundu, Ashish and Krishnan, Ram and Rios, Anthony},
   journal= {arXiv preprint arXiv:2510.07642},
   year   = {2025}
 }
 @article{policybank,
   title  = {{PolicyBank}: Evolving Policy Understanding for {LLM} Agents},
-  author = {{N. N.}},
+  author = {Choi, Jihye and Yoon, Jinsung and Le, Long T. and Jha, Somesh and Pfister, Tomas},
   journal= {arXiv preprint arXiv:2604.15505},
   year   = {2026}
 }
 
 % ===== Agent authorization / privilege control (control/permission plane) =====
 @article{progent,
-  title  = {{Progent}: Programmable Privilege Control for {LLM} Agents},
-  author = {{N. N.}},
+  title  = {{Progent}: Securing {AI} Agents with Privilege Control},
+  author = {Shi, Tianneng and He, Jingxuan and Wang, Zhun and Li, Hongwei and Wu, Linyu and Guo, Wenbo and Song, Dawn},
   journal= {arXiv preprint arXiv:2504.11703},
   year   = {2025}
 }
 @article{seagent,
   title  = {Taming Various Privilege Escalation in {LLM}-Based Agent Systems: A Mandatory Access Control Framework},
-  author = {Ji, Zimo and others},
+  author = {Ji, Zimo and Wu, Daoyuan and Jiang, Wenyuan and Ma, Pingchuan and Li, Zongjie and Gao, Yudong and Wang, Shuai and Li, Yingjiu},
   journal= {arXiv preprint arXiv:2601.11893},
   year   = {2026}
 }
 @article{pcas,
   title  = {Policy Compiler for Secure Agentic Systems},
-  author = {{N. N.}},
+  author = {Palumbo, Nils and Choudhary, Sarthak and Choi, Jihye and Amir, Guy and Chalasani, Prasad and Jha, Somesh},
   journal= {arXiv preprint arXiv:2602.16708},
   year   = {2026}
 }
 @article{agentguard,
   title  = {{AgentGuard}: An Attribute-Based Access Control Framework for Tool-Use {LLM}-Based Agents},
-  author = {{N. N.}},
+  author = {Luo, Jiaqi and Peng, Songyang and Dai, Jiarun and Chen, Zhile and Shen, Zhuoxiang and Hong, Geng and Pan, Xudong and Zhang, Yuan and Yang, Min},
   journal= {arXiv preprint arXiv:2605.28071},
   year   = {2026}
 }
 @article{clawguard,
   title  = {{ClawGuard}: A Runtime Security Framework for Tool-Augmented {LLM} Agents Against Indirect Prompt Injection},
-  author = {{N. N.}},
+  author = {Zhao, Wei and Li, Zhe and Zhang, Peixin and Sun, Jun},
   journal= {arXiv preprint arXiv:2604.11790},
   year   = {2026}
 }
@@ -80,7 +80,7 @@
 % ===== Information-flow / denial-channel =====
 @article{safeflow,
   title  = {{SAFEFLOW}: A Principled Protocol for Trustworthy and Transactional Autonomous Agent Systems},
-  author = {{N. N.}},
+  author = {Li, Peiran and Zou, Xinkai and Wu, Zhuohang and Li, Ruifeng and Xing, Shuo and Zheng, Hanwen and Hu, Zhikai and Wang, Yuping and Li, Haoxi and Yuan, Qin and Zhang, Yingmo and Tu, Zhengzhong},
   journal= {arXiv preprint arXiv:2506.07564},
   year   = {2025}
 }
@@ -94,13 +94,13 @@
 % ===== Database access-control synthesis =====
 @article{deploi,
   title  = {{DePLOI}: Applying {NL2SQL} to Synthesize and Audit Database Access Control},
-  author = {{N. N.}},
+  author = {Subramaniam, Pranav and Krishnan, Sanjay},
   journal= {arXiv preprint arXiv:2402.07332},
   year   = {2024}
 }
 @article{securemcp,
   title  = {{SecureMCP}: A Policy-Enforced {LLM} Data Access Framework for {AIoT} Systems via Model Context Protocol},
-  author = {{N. N.}},
+  author = {Kim, Wonbae and Yoo, Hee-Kyong},
   journal= {arXiv preprint arXiv:2605.05260},
   year   = {2026}
 }
@@ -108,7 +108,7 @@
 % ===== Position paper =====
 @inproceedings{visionaac,
   title    = {A Vision for Access Control in {LLM}-based Agent Systems},
-  author   = {Li, Xinfeng and others},
+  author   = {Li, Xinfeng and Huang, Dong and Li, Jie and Cai, Hongyi and Zhou, Zhenhong and Dong, Wei and Wang, XiaoFeng and Liu, Yang},
   booktitle= {Engineering of Complex Computer Systems (ICECCS)},
   year     = {2025}
 }

@@ -77,7 +77,7 @@ confused deputy \and relational-traversal \and Odoo \and PostgreSQL RLS \and pol
 
 \subsection{Control plane vs data-result plane}
 The \textbf{control plane (action)} asks ``may the agent call tool \emph{T} with parameters \emph{P}?'' --- the
-plane pre-action authorization frameworks (OAP, PCAS, SEAgent, AgentGuardian) govern. The \textbf{data-result
+plane pre-action authorization frameworks (OAP, PCAS, SEAgent, AgentGuard) govern. The \textbf{data-result
 plane} asks ``do the rows \emph{T} returns match the record-rule the user is entitled to?'' This is the axis we
 attack, in the setting where ERP governance is \textbf{incomplete}: the LLM stays \emph{outside} the security
 boundary (it only emits ORM tool-calls), and the PEP forces an authorization domain (reads) + a write-check
@@ -377,20 +377,18 @@ class and the same predicate-pushdown fix} on a second, independently-specified 
 Row-Level Security}. The mapping is 1:1: \code{CREATE POLICY {\dots} USING} $\approx$ an \code{ir.rule}; a child
 table with \textbf{RLS never enabled} $\approx$ a child model without a record rule; a direct child read $\approx$
 the confused-deputy traversal; the PEP's WITH-CHECK $\approx$ Postgres \code{WITH CHECK}. A governed parent
-\code{orders} (\code{FORCE ROW LEVEL SECURITY}, tenant policy) has an ungoverned FK-child \code{order\_lines}; the
-agent queries the child directly. Run as a dedicated \code{app\_user} (\code{NOSUPERUSER NOBYPASSRLS} --- a
-superuser/owner would bypass RLS and make it vacuous), each run emits an in-band positive control (parent read
-returns only the tenant's own 3/6 orders, \code{CONTROL-OK}); \code{cross\_tenant\_rows} is measured from a
-\code{tenant} label \textbf{no policy reads} (non-circular oracle). Result (\code{postgres:16}): the ungoverned
-child leaks \textbf{12 lines, 6 cross-tenant (LEAK)}; the inline \code{EXISTS}-pushdown closes it to \textbf{6, 0
-(SAFE)} without over-broad denial (control still passes); the identical query as superuser \code{odoo} returns
-12/6 even under pushdown, confirming meaningfulness only as \code{app\_user}. \textbf{Honest framing:} neither
-engine is broken --- both apply security per relation by design and default-allow an ungoverned relation; the
-contribution is that an \textbf{LLM agent operationalizes} a realistic DBA misconfiguration by choosing the
-direct-child path, and the \textbf{same fix} closes it in both engines. \textbf{Not} a defect claim, leak rate, or
-Odoo$\leftrightarrow$Postgres semantic equivalence (gap/fix-level analogy; one schema/version/two tenants).
-\code{make rls} regenerates + byte-diffs \code{results/rls.csv}; \code{tests/test\_rls\_model.py} calibrates the
-invariants + positive control + a static SQL safety-lint in CI without Docker.
+\code{orders} (\code{FORCE ROW LEVEL SECURITY}) has an ungoverned FK-child \code{order\_lines} the agent queries
+directly. Run as a dedicated \code{app\_user} (\code{NOSUPERUSER NOBYPASSRLS} --- a superuser/owner would bypass
+RLS, making it vacuous), each run emits an in-band positive control (parent read returns only the tenant's own
+3/6, \code{CONTROL-OK}) and measures \code{cross\_tenant\_rows} from a \code{tenant} label \textbf{no policy reads}
+(non-circular). Result (\code{postgres:16}): the child leaks \textbf{12 lines, 6 cross-tenant (LEAK)}; the inline
+\code{EXISTS}-pushdown closes it to \textbf{6, 0 (SAFE)} without over-broad denial; the same query as superuser
+\code{odoo} returns 12/6 even under pushdown (meaningful only as \code{app\_user}). \textbf{Honest framing:} neither
+engine is broken --- both default-allow an ungoverned relation; the contribution is that an \textbf{LLM agent
+operationalizes} a realistic DBA misconfiguration via the direct-child path, and the \textbf{same fix} closes both.
+\textbf{Not} a defect claim, leak rate, or Odoo$\leftrightarrow$Postgres equivalence (one schema/version/two
+tenants). \code{make rls} regenerates + byte-diffs \code{results/rls.csv}; \code{tests/test\_rls\_model.py}
+calibrates the invariants + positive control + a static SQL safety-lint in CI.
 
 \subsection{Real-Odoo-schema enforcement --- the PEP on unmodified \code{sale.order} (read, write, scope matrix)}
 Every result above uses the synthetic \code{pco\_core\_mock}. Here \code{make real-sale} installs the official
@@ -399,39 +397,25 @@ model the scanner (\S5.2) flagged. Odoo~19 ships \emph{paired} own-docs rules, s
 a \textbf{bespoke role}: read-ACL on both, a parent rule \code{[('user\_id','=',user.id)]}, line rule
 \emph{forgotten}. Fixtures are synthetic-seed but \textbf{schema/FK/rule-engine/ORM are 100\% real upstream Odoo}.
 
-\begin{center}\small
-\begin{tabular}{@{}llccc@{}}
-\toprule
-variant & probe & row\_count & cross\_owner & verdict \\
-\midrule
-V-native (no line rule) & parent-control & 3  & 0 & CONTROL-OK \\
-V-native (no line rule) & child-direct   & \textbf{12} & \textbf{6} & \textbf{LEAK} \\
-V-pep (owner pushdown)  & child-direct   & \textbf{6}  & \textbf{0} & \textbf{SAFE} \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-\textbf{Read.} The restricted user sees only its own 3/6 orders on the governed parent (in-band positive control)
-yet reads all \textbf{12} lines directly, 6 cross-owner (\textbf{LEAK}); the guard pushes the owner predicate down
-the FK to the own \textbf{6}, 0 cross-owner (\textbf{SAFE}), oracle non-circular (sudo on \code{order\_id.user\_id}),
-guard unmodified (per-call LOCAL policy). \textbf{Write.} With full CRUD on the line, three \emph{structural}
+\textbf{Read} (\code{results/real\_sale.csv}). The restricted user sees only its own 3/6 orders on the governed
+parent (in-band positive control, \code{CONTROL-OK}) yet reads all \textbf{12} lines directly, 6 cross-owner
+(\textbf{LEAK}); the guard pushes the owner predicate down the FK to the own \textbf{6}, 0 cross-owner
+(\textbf{SAFE}), oracle non-circular (sudo on \code{order\_id.user\_id}), guard unmodified (per-call LOCAL policy). \textbf{Write.} With full CRUD on the line, three \emph{structural}
 cross-owner writes (unlink/create/reassign) breach undefended and the write-check (USING + WITH-CHECK) \textbf{holds
 every one}; an own write succeeds; a foreign field-overwrite is natively blocked (parent-read \code{AccessError},
 reported as such not inflated). \textbf{Scope matrix.} Over \{owner,company\}$\times$\{draft,confirmed,locked\}
-$\times$\{create,write,unlink\}, the \emph{only} genuine breach is \textbf{owner$\times$draft$\times$create}: the
-company axis is natively governed (global comp-rule, \code{company\_id} stored on the line) and confirming/locking
-closes \code{create} (a parent \code{message\_post} the restricted user cannot perform), so the gap is
-\textbf{draft-only}. The PEP \textbf{never breaches any cell}, load-bearing exactly on the owner-axis create gap,
-fail-closed elsewhere. Savepoint-isolated, residue-asserted bit-for-bit back to seed; byte-stable
+$\times$\{create,write,unlink\}, the \emph{only} genuine breach is \textbf{owner$\times$draft$\times$create} (the
+company axis is natively governed; confirming/locking closes \code{create} via a parent \code{message\_post} the
+restricted user cannot perform). The PEP \textbf{never breaches any cell} --- load-bearing on the owner-axis create
+gap, fail-closed elsewhere; savepoint-isolated, residue-asserted bit-for-bit, byte-stable
 \code{results/real\_sale\{,\_write,\_write\_matrix\}.csv}.
 
 % =====================================================================
 \section{Integrity --- RQ6 (applied / adopt-not-invent)}
-A reliability threat orthogonal to authorization: an agent that retrieves the \emph{right} rows can still report
-a \emph{silently-wrong number}. We adopt the warehouse-native principle --- \textbf{the LLM must not do
-arithmetic; every number binds to an execution result} --- down to ERP (applied, not a novelty claim). Demos are
-deterministic (planted answers + symbolic gold, no LLM); what is shown is the \emph{mechanism}, real-LLM rate
-validated privately. Three complementary layers (TB.1/TB.2/TB.3):
+A reliability threat orthogonal to authorization: an agent that retrieves the \emph{right} rows can still report a
+\emph{silently-wrong number}. We adopt the warehouse-native principle --- \textbf{the LLM must not do arithmetic;
+every number binds to an execution result} --- down to ERP (applied, not a novelty claim; demos deterministic,
+planted answers + symbolic gold, no LLM). Three complementary layers (TB.1/TB.2/TB.3):
 
 \textbf{TB.1 --- numeric verifier} (\code{results/integrity.csv}). A pure scanner: each answer number must bind
 to the governed execution table or a \textbf{bounded derivation} (sum / pairwise-diff / ratio\% / pct-change /
@@ -566,16 +550,13 @@ embedding-RAG (Voyage \code{voyage-3.5}) & \textbf{8/8} cross-team via a semanti
 \end{tabular}
 \end{center}
 
-\noindent\textbf{Reading the table.} (i) A neutrally-prompted real LLM leaks at a consistent \textbf{0.377}
-(per-model 0.35--0.39, overlapping CIs) --- the confused-deputy with real agents, not a one-model fluke; models
-self-scope on benign queries but not attacks, so the guard is load-bearing. (ii) The same holds for the
-\textbf{indirect} vector (real 2-turn loop, 7/20 induced, \code{gpt-4o} resists all): the guard rewrites the domain
-\textbf{below the LLM boundary} so elimination is \emph{provenance-invariant}. (iii) Variance/integrity/answer-channel
-are \textbf{measurements, not security claims} (ASR temperature-stable; $\sim$half the numbers mis-computed; an
-\emph{authorized} value paraphrased into prose escapes the validator $\sim$50\% --- the answer-channel residual the
-PEP does \emph{not} close). (iv) With a real Voyage embedder a team-token-free query pulls \textbf{8/8} cross-team
-chunks a lexical ranker misses, yet the PEP is 0/0 (ranker-independent). \textbf{Across every facet: guarded leak 0
-regardless of model, provider, temperature, or provenance} --- though not stable production rates (small N, seed=42).
+\noindent\textbf{Reading the table.} A neutrally-prompted real LLM leaks at a consistent \textbf{0.377} (the
+confused-deputy with real agents, not a one-model fluke); the indirect vector behaves identically and the guard
+rewrites the domain \textbf{below the LLM boundary}, so elimination is \emph{provenance-invariant}. Variance,
+integrity, and the answer-channel residual are \textbf{measurements, not new security claims} (the
+$\sim$50\%-evading answer channel is the residual the PEP does \emph{not} close; the value was authorized), and the
+real Voyage embedder is security-irrelevant. \textbf{Across every facet: guarded leak 0 regardless of model,
+provider, temperature, or provenance} --- though not stable production rates (small N, seed=42).
 
 \subsection{Private validation (corroborating, not reproducible)}
 Because the guard rewrites the query domain \textbf{below the LLM trust boundary}, the row-level security property
