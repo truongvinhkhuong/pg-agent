@@ -1,0 +1,10 @@
+axis,state,op,undefended,pg_agent,outcome
+owner,draft,create,breach,denied,held
+owner,confirmed,create,denied,denied,native-block:confirmed-msg_post
+owner,locked,create,denied,denied,native-block:confirmed-msg_post
+owner,confirmed,unlink,denied,denied,native-block:_unlink_except_confirmed
+owner,confirmed,write,denied,denied,native-block:parent-read
+company,draft,create,denied,denied,native-block:multi-company-rule
+company,draft,write,denied,denied,native-block:multi-company-rule
+company,draft,unlink,denied,denied,native-block:multi-company-rule
+-,-,positive-control,na,na,SUCCESS

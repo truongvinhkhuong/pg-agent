@@ -318,3 +318,187 @@ def real_schema_write_run(env, outdir="results/repro"):
     assert pc_ok, "positive control FAILED: in-scope OWN guarded write did not succeed (guard blanket-denying?)"
     print(f"Wrote {out} (counts/verdicts only; byte-stable)\n")
     return rows
+
+
+# ── §5.6 WRITE MATRIX: map the gap's scope over {owner,company} × {draft,confirmed,locked} × {create,write,unlink}.
+# Verified vs Odoo 19 source: the gap is OWNER-axis-specific and persists into confirmed/locked for CREATE; Odoo
+# natively governs the rest (company axis = global multi-company rules; confirmed-unlink = _unlink_except_confirmed;
+# foreign field-write = parent-read coupling). The PEP is load-bearing where Odoo has a gap, belt-and-suspenders
+# elsewhere. We SET the guard-relevant state directly via sudo (we test the STATE the guards key on, not the
+# confirmation workflow). Every fixture/mutation is savepoint-isolated → zero residue.
+
+def _confirm(env, oid):
+    """Shortcut a sale.order to the confirmed state + materialize the line's stored related `state` column so the
+    confirmed-state guards (e.g. _unlink_except_confirmed) actually fire. Asserts propagation."""
+    o = env["sale.order"].sudo().browse(oid)
+    o.write({"state": "sale"})
+    o.flush_recordset(["state"])
+    lines = env["sale.order.line"].sudo().search([("order_id", "=", oid)])
+    lines.flush_recordset(["state"])
+    assert all(ln.state == "sale" for ln in lines), "line.state did not propagate to 'sale' (stored related)"
+
+
+def _lock(env, oid):
+    o = env["sale.order"].sudo().browse(oid)
+    o.write({"locked": True})
+    o.flush_recordset(["locked"])
+
+
+def _company_fixtures(env, product, compA):
+    """Create (inside the caller's savepoint, rolled back) a SECOND company B with an order, and a COMPANY-scoped
+    probe user `c` whose ONLY governance is the global multi-company rule (full CRUD ACL, ZERO ir.rule, not in the
+    owner-rule group) — so a deny on a company-B line is attributable to the company rule alone, not A's owner rule
+    or ACL. Distinct partner `RS-Partner-B` keeps the §5.6 `RS-Partner` counts frozen."""
+    company_b = env["res.company"].sudo().create({"name": "RS-Company-B"})
+    partner_b = env["res.partner"].sudo().create({"name": "RS-Partner-B", "company_id": company_b.id})
+    grp_comp = env["res.groups"].sudo().create({"name": "RS Company Role"})
+    access = env["ir.model.access"].sudo()
+    for m in ("sale.order", "sale.order.line"):       # full CRUD ACL, NO ir.rule on this group
+        access.create({"name": "rsc_acl_" + m, "model_id": env["ir.model"]._get(m).id,
+                       "group_id": grp_comp.id, "perm_read": True, "perm_write": True,
+                       "perm_create": True, "perm_unlink": True})
+    c = env["res.users"].sudo().create({
+        "name": "RS Company User C", "login": "rs_comp_c", "company_id": compA.id,
+        "company_ids": [(6, 0, [compA.id])],
+        _grpfield(env): [(6, 0, [env.ref("base.group_user").id, grp_comp.id])]})
+    b2 = env["sale.order"].sudo().create({
+        "partner_id": partner_b.id, "company_id": company_b.id, "user_id": c.id,
+        "order_line": [(0, 0, {"product_id": product.id, "product_uom_qty": 1}) for _ in range(2)]})
+    return company_b, b2, c
+
+
+def real_schema_write_matrix_run(env, outdir="results/repro"):
+    """§5.6 write MATRIX — characterizes WHERE the confused-deputy write gap lives + shows the PEP holds uniformly."""
+    company, partner, product, a, b, _grp = _seed(env)
+    SOL = env[_SOL].sudo()
+    SO = env["sale.order"].sudo()
+    penv = env(user=a.id)
+    guard = penv["pg.agent.guard"]
+    assert guard._authz_domain(_SOL, LOCAL_POLICY) == [("order_id.user_id", "=", a.id)], "guarded owner leaf wrong"
+    b_order = SO.search([("user_id", "=", b.id), ("partner_id", "=", partner.id)], order="id", limit=1)
+    cvals = {"order_id": b_order.id, "product_id": product.id, "product_uom_qty": 1}
+
+    def _owner_create(state):
+        """A creates a line on B's order in `state` (draft/confirmed/locked). breach = line added (count>2)."""
+        def run(guarded):
+            if state in ("confirmed", "locked"):
+                _confirm(env, b_order.id)
+            if state == "locked":
+                _lock(env, b_order.id)
+            mut = (lambda: guard.guarded_create(_SOL, dict(cvals), policy=LOCAL_POLICY)) if guarded \
+                else (lambda: penv[_SOL].create(dict(cvals)))
+            _safe_mutate(env, mut)
+            return SOL.search_count([("order_id", "=", b_order.id)]) > 2
+        return _isolated(env, lambda: run(False)), _isolated(env, lambda: run(True))
+
+    def _owner_unlink_confirmed():
+        def run(guarded):
+            _confirm(env, b_order.id)
+            line = SOL.search([("order_id", "=", b_order.id)], order="id", limit=1)
+            mut = (lambda: guard.guarded_unlink(_SOL, [line.id], policy=LOCAL_POLICY)) if guarded \
+                else (lambda: penv[_SOL].browse(line.id).unlink())
+            _safe_mutate(env, mut)
+            return SOL.search_count([("id", "=", line.id)]) == 0
+        return _isolated(env, lambda: run(False)), _isolated(env, lambda: run(True))
+
+    def _owner_write_confirmed():
+        def run(guarded):
+            _confirm(env, b_order.id)
+            line = SOL.search([("order_id", "=", b_order.id)], order="id", limit=1)
+            mut = (lambda: guard.guarded_write(_SOL, [line.id], {"name": _FOREIGN_SENTINEL}, policy=LOCAL_POLICY)) \
+                if guarded else (lambda: penv[_SOL].browse(line.id).write({"name": _FOREIGN_SENTINEL}))
+            _safe_mutate(env, mut)
+            return SOL.search_count([("id", "=", line.id), ("name", "=", _FOREIGN_SENTINEL)]) > 0
+        return _isolated(env, lambda: run(False)), _isolated(env, lambda: run(True))
+
+    def _company(op):
+        """A COMPANY-scoped user c attempts `op` on a company-B line. The ONLY thing that can deny c is the global
+        multi-company rule (c has full CRUD ACL, no owner/team rule)."""
+        def run(guarded):
+            _company_b, b2, c = _company_fixtures(env, product, company)
+            cenv = env(user=c.id, context=dict(env.context, allowed_company_ids=[company.id]))
+            cline = env[_SOL].sudo().search([("order_id", "=", b2.id)], order="id", limit=1)
+            cg = cenv["pg.agent.guard"]
+            cv = {"order_id": b2.id, "product_id": product.id, "product_uom_qty": 1}
+            if op == "create":
+                mut = (lambda: cg.guarded_create(_SOL, dict(cv), policy=LOCAL_POLICY)) if guarded \
+                    else (lambda: cenv[_SOL].create(dict(cv)))
+                _safe_mutate(env, mut)
+                return env[_SOL].sudo().search_count([("order_id", "=", b2.id)]) > 2
+            if op == "write":
+                mut = (lambda: cg.guarded_write(_SOL, [cline.id], {"name": _FOREIGN_SENTINEL}, policy=LOCAL_POLICY)) \
+                    if guarded else (lambda: cenv[_SOL].browse(cline.id).write({"name": _FOREIGN_SENTINEL}))
+                _safe_mutate(env, mut)
+                return env[_SOL].sudo().search_count([("id", "=", cline.id), ("name", "=", _FOREIGN_SENTINEL)]) > 0
+            mut = (lambda: cg.guarded_unlink(_SOL, [cline.id], policy=LOCAL_POLICY)) if guarded \
+                else (lambda: cenv[_SOL].browse(cline.id).unlink())
+            _safe_mutate(env, mut)
+            return env[_SOL].sudo().search_count([("id", "=", cline.id)]) == 0
+        return _isolated(env, lambda: run(False)), _isolated(env, lambda: run(True))
+
+    # (axis, state, op, thunk, native_reason). EMPIRICALLY VERIFIED (AccessError "Document type: Message"): on a
+    # CONFIRMED/LOCKED order a line create triggers a parent message_post ("Extra line ...") = a mail.message
+    # create the restricted user cannot perform → native-block. So the confused-deputy CREATE gap is DRAFT-ONLY.
+    cells = [
+        ("owner", "draft", "create", lambda: _owner_create("draft"), None),
+        ("owner", "confirmed", "create", lambda: _owner_create("confirmed"), "confirmed-msg_post"),
+        ("owner", "locked", "create", lambda: _owner_create("locked"), "confirmed-msg_post"),
+        ("owner", "confirmed", "unlink", _owner_unlink_confirmed, "_unlink_except_confirmed"),
+        ("owner", "confirmed", "write", _owner_write_confirmed, "parent-read"),
+        ("company", "draft", "create", lambda: _company("create"), "multi-company-rule"),
+        ("company", "draft", "write", lambda: _company("write"), "multi-company-rule"),
+        ("company", "draft", "unlink", lambda: _company("unlink"), "multi-company-rule"),
+    ]
+
+    print("\n=== Real-Odoo-schema WRITE matrix (owner/company axes × draft/confirmed/locked) ===")
+    rows = []
+    for axis, state, op, thunk, reason in cells:
+        ub, gb = thunk()
+        if ub:
+            outcome = "RESIDUAL-LEAK" if gb else "held"
+        else:
+            outcome = "native-block:" + (reason or "?")
+        rows.append([axis, state, op, "breach" if ub else "denied", "breach" if gb else "denied", outcome])
+        print(f"  {axis:<8}{state:<11}{op:<8} undefended={'breach' if ub else 'denied'} "
+              f"pg_agent={'breach' if gb else 'denied'} -> {outcome}")
+
+    # positive control: A's OWN draft line guarded write succeeds.
+    a_line = SOL.search([("order_id.user_id", "=", a.id)], order="id", limit=1)
+    pc_ok = _isolated(env, lambda: (guard.guarded_write(_SOL, [a_line.id], {"name": _OWN_SENTINEL}, policy=LOCAL_POLICY),
+                                    SOL.search_count([("id", "=", a_line.id), ("name", "=", _OWN_SENTINEL)]) > 0)[1])
+    rows.append(["-", "-", "positive-control", "na", "na", "SUCCESS" if pc_ok else "CONTROL-FAIL"])
+    print(f"  {'-':<8}{'-':<11}{'pos-ctrl':<8} OWN guarded write -> {'SUCCESS' if pc_ok else 'CONTROL-FAIL'}")
+
+    # residue snapshot (HARD): seed intact + NO company-B order + NO state/lock leaked out of a savepoint.
+    lines_p = SOL.search_count([("order_id.partner_id", "=", partner.id)])
+    orders_p = SO.search_count([("partner_id", "=", partner.id)])
+    b_orders = SO.search_count([("partner_id.name", "=", "RS-Partner-B")])
+    sentinel = SOL.search_count(["|", ("name", "=", _FOREIGN_SENTINEL), ("name", "=", _OWN_SENTINEL)])
+    confirmed = SO.search_count([("partner_id", "=", partner.id), ("state", "=", "sale")])
+    locked = SO.search_count([("partner_id", "=", partner.id), ("locked", "=", True)])
+    assert lines_p == 12 and orders_p == 6 and b_orders == 0 and sentinel == 0 and confirmed == 0 and locked == 0, \
+        (f"matrix residue (savepoint isolation broke): lines {lines_p} orders {orders_p} B-orders {b_orders} "
+         f"sentinel {sentinel} confirmed {confirmed} locked {locked}")
+
+    out = os.path.join(outdir, "real_sale_write_matrix.csv")
+    os.makedirs(outdir, exist_ok=True)
+    with open(out, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh, lineterminator="\n")
+        w.writerow(["axis", "state", "op", "undefended", "pg_agent", "outcome"])
+        w.writerows(rows)
+
+    # HARD: the genuine breaches are held; the guard never breaches anywhere; positive control; >=1 breach.
+    breached_rows = [r for r in rows if r[3] == "breach"]
+    assert breached_rows, "matrix vacuous: no undefended breach (the owner-create gap must fire)"
+    for r in rows:
+        assert r[4] != "breach", f"{r[0]}/{r[1]}/{r[2]}: PEP write-check FAILED (guarded breach)"
+        if r[3] == "breach":
+            assert r[5] == "held", f"{r[0]}/{r[1]}/{r[2]}: breach not held ({r[5]})"
+    assert pc_ok, "matrix positive control FAILED"
+    # FINDING WARN: a cell expected to native-block that instead breached (an Odoo-regression signal).
+    for axis, state, op, _t, reason in cells:
+        row = next(r for r in rows if r[0] == axis and r[1] == state and r[2] == op)
+        if reason and row[3] == "breach":
+            print(f"WARN: {axis}/{state}/{op} was expected native-block ({reason}) but BREACHED — investigate.")
+    print(f"Wrote {out} ({len(rows)} rows; {len(breached_rows)} genuine breaches all held) -> {outdir}/\n")
+    return rows

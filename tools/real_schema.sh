@@ -33,12 +33,13 @@ echo "-- seed + probe (real sale.order / sale.order.line): READ plane + WRITE pl
 $DC run --rm -T --entrypoint odoo odoo shell -d "$DB" --addons-path="$ADDONS" \
   --db_host=db --db_port=5432 --db_user=odoo --no-http <<'PY' 2>&1 | grep -v -e 'INFO' -e 'WARNING' -e '^odoo\.' -e '^$'
 exec(open('tools/real_schema.py').read())
-real_schema_run(env, outdir='results/repro')          # §5.6 read plane  -> real_sale.csv
-real_schema_write_run(env, outdir='results/repro')    # §5.6 write plane -> real_sale_write.csv (savepoint-isolated)
+real_schema_run(env, outdir='results/repro')             # §5.6 read plane  -> real_sale.csv
+real_schema_write_run(env, outdir='results/repro')       # §5.6 write plane -> real_sale_write.csv (savepoint-isolated)
+real_schema_write_matrix_run(env, outdir='results/repro') # §5.6 write MATRIX -> real_sale_write_matrix.csv (savepoint-isolated)
 env.cr.commit()
 PY
 
-FILES="real_sale.csv real_sale_write.csv"   # read plane + write plane
+FILES="real_sale.csv real_sale_write.csv real_sale_write_matrix.csv"   # read + write + write-matrix planes
 for f in $FILES; do
   OUT="results/repro/$f"
   if [ ! -f "$OUT" ]; then

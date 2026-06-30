@@ -538,8 +538,8 @@ for the read plane. We did **not** manufacture the gap: the scanner flagged it b
 one realistic parent rule and zero child rules (the same govern-parent-forget-child posture as the mock, now on the
 real model). The leak oracle is **non-circular** (cross-owner measured via sudo on `order_id.user_id`, never the
 guard's verdict). The guard is **unmodified** — the new model is bound through a per-call LOCAL policy, leaving the
-global `POLICY` (and every existing byte-stable result) untouched. Scope: read / owner axis / single company /
-draft orders; company-axis and the write plane on real models are future work. Byte-stable: `make real-sale`
+global `POLICY` (and every existing byte-stable result) untouched. Scope (read plane): owner axis / single company;
+the write plane + the company-axis/confirmed/locked scope matrix on the real schema follow below. Byte-stable: `make real-sale`
 regenerates [`results/real_sale.csv`](../results/real_sale.csv) (counts/verdicts only — no ids/names/dates) and
 byte-diffs it; `tests/test_real_schema.py` calibrates the invariants + the positive control + a static lint of the
 driver in CI without Docker.
@@ -568,8 +568,36 @@ overwrite, does **not** breach — Odoo incidentally blocks it because writing a
 read raises an `AccessError` (a parent-read coupling); the PEP denies it too (defense-in-depth), but it is **not**
 a gap we close, and we report it as a native block rather than inflate the count. Every attempt is rolled back
 (savepoint + `env.clear()`); a post-run snapshot asserts the DB is bit-for-bit back to seed (12 lines / 6 orders /
-0 sentinel rows). Scope: owner axis, single company, draft orders; the company axis, confirmed/locked orders, and
-multi-company writes on the real schema are future work.
+0 sentinel rows).
+
+**Write-plane SCOPE matrix** ([`results/real_sale_write_matrix.csv`](../results/real_sale_write_matrix.csv)). To
+map exactly *where* the confused-deputy write gap lives on the real schema, we run a matrix over {owner, company}
+axes × {draft, confirmed, locked} states × {create, write, unlink} (each cell savepoint-isolated; confirmed/locked
+set via sudo on the guard-relevant stored columns — we test the *state* the guards key on, not the confirmation
+workflow; a `line.state=='sale'` propagation assert guards against a silent mis-classification):
+
+| axis | state | op | undefended | with PEP | outcome |
+|---|---|---|---|---|---|
+| owner | draft | create | **breach** | denied | **held** |
+| owner | confirmed | create | denied | denied | native-block: parent `message_post` |
+| owner | locked | create | denied | denied | native-block: parent `message_post` |
+| owner | confirmed | unlink | denied | denied | native-block: `_unlink_except_confirmed` |
+| owner | confirmed | write | denied | denied | native-block: parent-read |
+| company | draft | create / write / unlink | denied | denied | native-block: multi-company rule |
+
+**The scope is narrow and the result is mostly a negative finding that characterizes the gap.** The *only* genuine
+confused-deputy write breach in the matrix is **owner-axis × draft × create** (the §5.6 cells above); everywhere
+else Odoo governs natively: (i) the **company axis** is closed by the global multi-company rules
+`sale_order_(line_)comp_rule` (`company_id` is a stored field on the line — unlike the *owner* rule, which the
+bespoke role forgets on the child); (ii) **confirming or locking** the parent additionally closes even `create` —
+a line create on a `state=='sale'` order triggers a parent `message_post` (a `mail.message` create) that the
+restricted user cannot perform (`AccessError`, empirically verified), so the gap is **draft-only**; (iii)
+confirmed `unlink` is closed by `_unlink_except_confirmed`, and the foreign field-write by the parent-read coupling.
+The PG-Agent PEP write-check **holds the one genuine breach and never breaches any cell** (the guard is never more
+permissive than native governance anywhere in the matrix); where Odoo natively governs, the PEP denies in lockstep
+(fail-closed defense-in-depth — *not* the PEP enforcing the company axis, which `LOCAL_POLICY` leaves to Odoo). So
+the PEP is **load-bearing exactly on the owner-axis create gap** and belt-and-suspenders elsewhere. This completes
+the real-schema characterization: the confused-deputy write gap is owner-axis-, child-rule-, draft-specific.
 
 ---
 
@@ -717,14 +745,17 @@ Agents."*
   verifier catches 0.50–0.67). The **real embedding-RAG** surfacing is now also measured (§10.1.4: a VoyageAI
   `voyage-3.5` retriever surfaces 78 cross-team/confidential chunks undefended — incl. 8/8 via a semantic query the
   lexical ranker misses — and the delivery-time PEP drops all → guarded 0; the embedder is security-irrelevant).
-- **Real-schema enforcement is owner-axis / single-company (§5.6):** the PEP is now shown on the **real,
-  unmodified upstream Odoo `sale.order`/`sale.order.line`** (not just the synthetic mock) for **both** the read
-  plane (12/6 → 6/0) **and** the write plane (3 structural confused-deputy mutations breach undefended and the
-  write-check holds all three; an own write still succeeds) — closing the long-standing "mock model only" caveat,
-  with the in-band positive control proving the run is non-bypassing. Still scoped to the **owner axis, single
-  company, draft orders**: the company-axis gap, confirmed/locked orders, and multi-company writes on the real
-  schema remain future work. (A foreign field-overwrite is incidentally blocked by Odoo's parent-read coupling —
-  reported as a native block, not an enforcement claim.)
+- **Real-schema enforcement + scope characterization (§5.6):** the PEP is shown on the **real, unmodified upstream
+  Odoo `sale.order`/`sale.order.line`** (not just the synthetic mock) for the read plane (12/6 → 6/0), the write
+  plane (3 structural confused-deputy mutations breach undefended, the write-check holds all three, an own write
+  succeeds), AND a **scope matrix** {owner, company} × {draft, confirmed, locked} × {create, write, unlink} that
+  empirically maps **where** the gap lives: it is **owner-axis-, child-rule-, draft-specific** — the company axis is
+  natively governed (global multi-company rules), and confirming/locking the parent additionally closes even
+  `create` (a parent `message_post` the restricted user can't perform). The PEP is **load-bearing exactly on the
+  owner-axis create gap** and never more permissive than native governance anywhere in the matrix (belt-and-suspenders
+  + fail-closed elsewhere — *not* a claim that the PEP enforces the company axis, which Odoo does). The remaining
+  real-schema future work is the answer channel (out of any data-plane PEP scope) — the confused-deputy write gap on
+  this schema is now fully characterized.
 - **CE gap rate is low per model but endemic across domains (§5.2.1):** standard Odoo is broadly
   company-governed, so per model the gap is rare (15 of 2 072 reachable child×axis pairs, 0.7%); the finding is
   **breadth** — it recurs in 6 of 8 at-risk domains — not a high per-model rate. The headline is the per-domain

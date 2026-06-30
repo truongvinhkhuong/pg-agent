@@ -649,9 +649,37 @@ write-check \textbf{holds every one} (USING denies a foreign target; WITH-CHECK 
 \emph{field}-overwrite does NOT breach --- Odoo incidentally blocks it (writing a line whose parent A cannot read
 raises \code{AccessError}); the PEP denies it too (defense-in-depth), but we report it as a native block rather than
 inflate the count. Every attempt is rolled back (savepoint + \code{env.clear()}); a post-run snapshot asserts the DB
-is bit-for-bit back to seed. Scope: owner axis / single company / draft; company-axis + confirmed/multi-company
-writes are future work. Byte-stable \code{results/real\_sale\_write.csv}; calibrated offline by
+is bit-for-bit back to seed. Byte-stable \code{results/real\_sale\_write.csv}; calibrated offline by
 \code{tests/test\_real\_schema.py}.
+
+\paragraph{Write-plane scope matrix.} To map WHERE the gap lives, we run \{owner, company\}~$\times$~\{draft,
+confirmed, locked\}~$\times$~\{create, write, unlink\} (each savepoint-isolated; confirmed/locked set via sudo on
+the stored columns the guards key on).
+
+\begin{center}\small
+\begin{tabular}{@{}lllccl@{}}
+\toprule
+axis & state & op & undef & with PEP & outcome \\
+\midrule
+owner & draft & create & \textbf{breach} & denied & \textbf{held} \\
+owner & confirmed/locked & create & denied & denied & native-block: parent \code{message\_post} \\
+owner & confirmed & unlink & denied & denied & native-block: \code{\_unlink\_except\_confirmed} \\
+owner & confirmed & write & denied & denied & native-block: parent-read \\
+company & draft & create/write/unlink & denied & denied & native-block: multi-company rule \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The result is mostly a NEGATIVE finding that characterizes the gap: the \emph{only} genuine confused-deputy write
+breach is \textbf{owner~$\times$~draft~$\times$~create}. The \textbf{company axis} is natively governed (global
+\code{sale\_order\_(line\_)comp\_rule}; \code{company\_id} is stored on the line --- unlike the \emph{owner} rule the
+bespoke role forgets); \textbf{confirming/locking} the parent additionally closes even \code{create} (a line create
+on a \code{state=='sale'} order triggers a parent \code{message\_post} the restricted user cannot perform ---
+\code{AccessError}, empirically verified) so the gap is \textbf{draft-only}; confirmed \code{unlink} and foreign
+field-write are closed by \code{\_unlink\_except\_confirmed} / parent-read. The PEP write-check \textbf{holds the one
+genuine breach and never breaches any cell} (never more permissive than native governance); where Odoo governs, it
+denies fail-closed (defense-in-depth, NOT the PEP enforcing the company axis --- \code{LOCAL\_POLICY} leaves that to
+Odoo). So the PEP is \textbf{load-bearing exactly on the owner-axis create gap}, belt-and-suspenders elsewhere.
 
 % =====================================================================
 \section{Integrity --- RQ6 (applied / adopt-not-invent)}
@@ -817,14 +845,15 @@ framing: \emph{``Policy-Closure Compilation for Row-Level Authorization in ERP L
         $\sim$half; verifier catches 0.50--0.67). The \textbf{real embedding-RAG} surfacing is now also measured
         (\S10.1.4: a VoyageAI \code{voyage-3.5} retriever surfaces 78 cross-team/confidential chunks undefended ---
         incl. 8/8 via a semantic query the lexical ranker misses --- the delivery-time PEP drops all $\to$ guarded 0).
-  \item \textbf{Real-schema enforcement is owner-axis / single-company (\S5.6):} the PEP is now shown on the
-        \textbf{real, unmodified upstream Odoo \code{sale.order}/\code{sale.order.line}} (not just the synthetic
-        mock) for \textbf{both} the read plane (12/6 $\to$ 6/0) \textbf{and} the write plane (3 structural
-        confused-deputy mutations breach undefended, the write-check holds all three; an own write still succeeds),
-        closing the long-standing ``mock-only'' caveat with a binding positive control. Still scoped to owner axis
-        / single company / draft orders; the company-axis gap, confirmed/locked orders, and multi-company writes on
-        the real schema remain future work (a foreign field-overwrite is incidentally blocked by Odoo's parent-read
-        coupling --- reported as a native block, not an enforcement claim).
+  \item \textbf{Real-schema enforcement + scope characterization (\S5.6):} the PEP is shown on the \textbf{real,
+        unmodified upstream Odoo \code{sale.order}/\code{sale.order.line}} for the read plane (12/6 $\to$ 6/0), the
+        write plane (3 structural confused-deputy mutations breach undefended, write-check holds all three, own
+        write succeeds), AND a \textbf{scope matrix} \{owner, company\}$\times$\{draft, confirmed, locked\} that
+        empirically maps the gap as \textbf{owner-axis-, child-rule-, draft-specific}: the company axis is natively
+        governed (global multi-company rules), and confirming/locking additionally closes \code{create} (parent
+        \code{message\_post}). The PEP is load-bearing exactly on the owner-axis create gap and never more permissive
+        than native governance anywhere in the matrix. Remaining real-schema future work: the answer channel (out of
+        any data-plane PEP scope) --- the confused-deputy write gap on this schema is now fully characterized.
   \item \textbf{CE gap count is modest:} standard Odoo is broadly company-governed; the 5 gaps are real but the
         heavier gap/burden target is the bespoke \code{pco_core} or larger module sets.
   \item \textbf{Emit soundness is bounded but characterized (\S5.3.1):} the conservative gate emits only single

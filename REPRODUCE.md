@@ -55,7 +55,7 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
 | 5.3 | emit + verify | `emit_classify(env)` | `results/scale/emit.csv` | scale |
 | 5.3.1 | soundness frontier 1/5→3/5 | `soundness_report(env)` | `results/scale/soundness.csv` | **scale (env-sensitive)** |
 | 5.5 | cross-engine RLS gap+fix (RQ9) | `make rls` (`tools/rls_probe.sh`) | `results/rls.csv` | **opt-in (db-only, byte-stable)** |
-| 5.6 | real-Odoo-schema enforcement (read + write) | `make real-sale` (`tools/real_schema.sh`, installs `sale`) | `results/real_sale.csv` + `real_sale_write.csv` | **opt-in (byte-stable)** |
+| 5.6 | real-Odoo-schema enforcement (read + write + scope matrix) | `make real-sale` (`tools/real_schema.sh`, installs `sale`) | `results/real_sale.csv` + `real_sale_write.csv` + `real_sale_write_matrix.csv` | **opt-in (byte-stable)** |
 | 5.4 | ABAC/ReBAC round-trip (RQ7) | `policy_model(env)` | `results/policy_model.csv` | reproduce-all |
 | 6.1 / 6.2 | integrity (RQ6) | `integrity(env)` ; `integrity_formula(env)` | `results/integrity*.csv` | reproduce-all |
 | 7 | Doc-RAG plane (RQ8) | `docrag(env)` | `results/docrag.csv` | reproduce-all |
@@ -88,6 +88,10 @@ make clean         # tears down ONLY the pgagent-ae stack + removes results/repr
   `CONTROL-OK` (parent count 3<6 = the rule binds, run non-bypassing). WRITE — 3 structural confused-deputy
   mutations (unlink/create/reassign) breach undefended and the write-check holds all 3 (`held`); an own guarded
   write succeeds (`SUCCESS`); a foreign field-overwrite is natively blocked by Odoo (reported, not an enforcement claim).
+  SCOPE MATRIX {owner,company}×{draft,confirmed,locked}×{create,write,unlink} — the ONLY genuine breach is
+  owner/draft/create (held); the company axis (multi-company rule) + confirmed/locked (parent `message_post` /
+  `_unlink_except_confirmed`) are natively governed → the gap is owner-axis-, child-rule-, draft-specific; the PEP
+  never breaches any cell.
 - **§10.1.1** real-LLM pooled ASR-without-guard **0.377** (26/69, Wilson 95% CI [0.272, 0.495]), **guarded 0/72**
   across 4 models / 2 providers (see caveats).
 - **§10.1.2** indirect / tool-output injection (real 2-turn, poisoned RAG/ERP-note): **7/20** probes induced a

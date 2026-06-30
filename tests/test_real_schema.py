@@ -21,14 +21,23 @@ import re
 _D = os.path.dirname(__file__)
 _CSV = os.path.join(_D, "..", "results", "real_sale.csv")
 _WCSV = os.path.join(_D, "..", "results", "real_sale_write.csv")
+_MCSV = os.path.join(_D, "..", "results", "real_sale_write_matrix.csv")
 _DRV = os.path.join(_D, "..", "tools", "real_schema.py")
 
 with open(_CSV, newline="", encoding="utf-8") as _fh:
     _ROWS = list(csv.DictReader(_fh))
 with open(_WCSV, newline="", encoding="utf-8") as _fh:
     _WROWS = list(csv.DictReader(_fh))
+with open(_MCSV, newline="", encoding="utf-8") as _fh:
+    _MROWS = list(csv.DictReader(_fh))
 with open(_DRV, encoding="utf-8") as _fh:
     _SRC = _fh.read()
+
+
+def _mrow(axis, state, op):
+    hits = [r for r in _MROWS if r["axis"] == axis and r["state"] == state and r["op"] == op]
+    assert len(hits) == 1, f"expected one matrix row {axis}/{state}/{op}, got {len(hits)}"
+    return hits[0]
 
 
 def _row(variant, probe):
@@ -113,6 +122,37 @@ def test_write_csv_shape():
     assert all(r["pg_agent"] != "breach" for r in _WROWS)
 
 
+# ── (1c) write MATRIX: scope of the confused-deputy gap over {owner,company} × {draft,confirmed,locked} ──
+def test_matrix_shape():
+    assert len(_MROWS) == 9
+    assert {(r["axis"], r["state"], r["op"]) for r in _MROWS} == {
+        ("owner", "draft", "create"), ("owner", "confirmed", "create"), ("owner", "locked", "create"),
+        ("owner", "confirmed", "unlink"), ("owner", "confirmed", "write"),
+        ("company", "draft", "create"), ("company", "draft", "write"), ("company", "draft", "unlink"),
+        ("-", "-", "positive-control")}
+
+
+def test_matrix_pep_holds_every_breach_and_never_breaches():
+    # the security invariant across the whole matrix: the guard NEVER breaches, and every cell that breaches
+    # undefended is HELD by the PEP write-check.
+    for r in _MROWS:
+        assert r["pg_agent"] != "breach", f"{r['axis']}/{r['state']}/{r['op']}: guarded breach"
+        if r["undefended"] == "breach":
+            assert r["outcome"] == "held", f"{r['axis']}/{r['state']}/{r['op']}: breach not held"
+    assert any(r["undefended"] == "breach" for r in _MROWS), "matrix vacuous: no genuine breach"
+
+
+def test_matrix_gap_is_owner_draft_create_only():
+    # the scope characterization: the ONLY genuine confused-deputy write breach in the matrix is owner/draft/create;
+    # confirming/locking the parent (message_post coupling) and the company axis (multi-company rule) close the rest.
+    breaches = {(r["axis"], r["state"], r["op"]) for r in _MROWS if r["undefended"] == "breach"}
+    assert breaches == {("owner", "draft", "create")}, f"unexpected breach scope: {breaches}"
+    assert _mrow("owner", "confirmed", "create")["outcome"] == "native-block:confirmed-msg_post"
+    assert _mrow("owner", "confirmed", "unlink")["outcome"] == "native-block:_unlink_except_confirmed"
+    assert _mrow("company", "draft", "create")["outcome"] == "native-block:multi-company-rule"
+    assert _mrow("-", "-", "positive-control")["outcome"] == "SUCCESS"
+
+
 # ── (2) static safety-token lint of the single-source-of-truth driver ────────
 def test_local_policy_team_company_off():
     # the #1 vacuity trap: a team_path with a restricted non-team user forces [('id','=',0)] (empty set),
@@ -167,6 +207,18 @@ def test_write_driver_crud_acl_on_line_only_not_header():
     # stays read-only (the gap is the missing line RULE, not the ACL). The probe user is NOT in a sales_team group.
     assert '"sale.order": (True, False, False, False)' in _SRC      # header read-only
     assert '"sale.order.line": (True, True, True, True)' in _SRC    # line full CRUD
+
+
+def test_matrix_driver_isolation_and_company_user():
+    # confirm/lock must be in-savepoint with a state-propagation flush+assert; the company axis must use a DISTINCT
+    # company-scoped user (allowed_company_ids) + a DISTINCT partner so the §5.6 frozen CSVs stay byte-identical; the
+    # residue snapshot must assert state/lock fully rolled back.
+    assert 'flush_recordset(["state"])' in _SRC and 'ln.state == "sale"' in _SRC   # propagation check
+    assert "allowed_company_ids" in _SRC and "RS-Partner-B" in _SRC                # company isolation, distinct partner
+    assert '("state", "=", "sale")' in _SRC and '("locked", "=", True)' in _SRC    # residue: state/lock rolled back
+    assert "_unlink_except_confirmed" in _SRC                                       # the native-block reason labels
+    # the misattributed owner×locked×write cell was DROPPED (locked guard never runs for a foreign line)
+    assert '("owner", "locked", "write"' not in _SRC
 
 
 if __name__ == "__main__":
