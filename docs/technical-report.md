@@ -709,6 +709,36 @@ that residual (carried as one out-of-scope free-prose probe). **No real-LLM / em
   they characterize/measure the leak, we **operationally close** the observable (identical empty result +
   constant-time, measured as Existence-Inference Rate 1/1 → 0/1, §4.4). Complementary: their lens is the
   theory of the channel; ours is a deployable PEP defense + a benchmark metric for it.
+- **Data-infrastructure enforcement below the model — the closest architectural neighbor found (post-June-2025
+  sweep, §12):** Data Flow Control / Passant (arXiv 2606.05679) enforces declarative policies via query-rewriting
+  at the DBMS layer across five engines (~0% overhead), explicitly framing itself as "moving data safety from
+  prompts and post-hoc checks into the data infrastructure" — the same below-the-model thesis PG-Agent argues.
+  It differs on every axis that matters here: policies are provenance-monomial predicates for **generic
+  SQL-generating agents**, not derived from an ERP ORM/record-rule graph; no relational-traversal/BOLA framing,
+  no policy-closure compiler, no pushdown-soundness theorem, no write-plane (WITH CHECK) treatment.
+- **GAAP** (arXiv 2604.19657, Apr 2026) — a deterministic information-flow-control agent-execution environment
+  that doesn't trust the model/prompt with private user data. Scope is single-user personal-data disclosure
+  (OS/personal-assistant level, not multi-tenant ERP rows); its headline "100% blocks all attacks / no
+  significant utility loss" framing does **not** survive scrutiny of its own reported numbers (a 5–19-point
+  utility drop vs. its own baselines on a narrow, self-administered 20-task benchmark) — cited here as the
+  adjacent deterministic-IFC lineage, not as an equivalent or superior system.
+- **Write-plane analogue (tool-call/API level, not DB row level):** a June-2026 confused-deputy audit of
+  LangChain/LlamaIndex/Stripe Agent Toolkit proposes *ScopeGate*, a 5-stage PDP/PEP
+  (scope/authorization/money-ceiling/idempotency/default-deny) and demonstrates a concrete unauthorized-payout
+  exploit under LangChain's default dispatch that ScopeGate blocks. The enforcement point is the tool-call
+  argument value, not a DB-row-level USING/WITH-CHECK predicate — the same *class* of confused-deputy write gap
+  RQ10 closes, one layer up the stack.
+- **AgentLeak** (accepted, IEEE Access 2026) — a 7-channel multi-agent privacy-leakage taxonomy finding that
+  inter-agent messages leak far more than final outputs (68.8% vs. 27.2%) and, notably, that **82% of detected
+  leaks are paraphrased/semantic, not verbatim** — independent, external corroboration that the answer-channel
+  paraphrase residual (§9, §10.1.3's ~50% evasion rate) is a broadly recognized, unsolved problem across the
+  2025–26 literature, not an artifact specific to this evaluation's output-validator.
+- A 2026 taxonomy of agent-safety benchmarks (arXiv 2605.16282) catalogs 40 benchmarks (2023–2026); none targets
+  row-level DB/ERP authorization, though its search protocol was deliberately scoped to AI-safety-benchmark
+  venues rather than DB-security venues, so this is *suggestive*, not conclusive, evidence of an unoccupied
+  niche. Separately useful: it finds **no ranking concordance across existing agent-safety benchmarks**
+  (Kendall's W = 0.10, p = 0.94) and that LLM-as-judge scoring carries ~40% position bias — independent support
+  for this artifact's choice of deterministic ground-truth oracles over LLM-judge scoring throughout.
 
 **Novelty (honest):** the *combination* — ERP record-rule incompleteness on child models × agent-driven
 relational-traversal exploitation × the first adversarial benchmark × a relational-closure compiler — not any
@@ -1031,3 +1061,112 @@ write-check (USING + WITH-CHECK) closes the confused-deputy *write* gap on creat
 breaching writes held — including a reassignment the naive native rule misses for want of a `WITH CHECK`). The
 work is applied-security + benchmark + reference implementation for an under-served setting, with an explicitly
 honest soundness frontier.
+
+---
+
+## 12. Future directions (researched, not implemented)
+
+Two candidate extensions were evaluated against the 2024–2026 literature (two independent deep-research sweeps —
+one general positioning/gap-analysis pass, one targeted at these two directions specifically — plus a follow-up
+targeted search to check for an exact-match published system before any novelty claim below). Both are **research
+findings about the literature, not commitments**: nothing here is implemented, and nothing in §1–§11 depends on
+either direction. Each verified claim below carries its own arXiv ID for traceability; several candidate claims
+that did **not** survive 3-vote adversarial verification during this research are omitted rather than reported as
+findings (the workflow's own refutation of, e.g., an over-strong reading of DP-RAG as "proof that inference-time
+mechanisms can furnish a leakage-bound proof" is itself informative and is reflected in the framing below).
+
+### 12.1 Inference-time scaling for permission-safety (a verify-refine loop)
+
+The candidate pipeline: classify permission/intent/risk → plan retrieval → retrieve under the row-domain →
+rerank → draft an answer → verify evidence **and** permission-leakage jointly → loop back if evidence is
+insufficient → risk-graded response (full-answer / redacted / refuse / escalate-to-human) → cite.
+
+**No published system implements this exact combination for authorization/permission** (as opposed to factual
+quality). This was checked three ways: (1) a broad literature sweep found only single-pass mechanisms — Self-Sanitize
+(arXiv 2509.24488) and SafeRAG-Steering (arXiv 2510.10452) explicitly avoid multi-round review for latency
+reasons; Self-RAG's reflection-token self-critique (arXiv 2310.11511) targets factual grounding only, with zero
+mention of safety/permission anywhere in the paper; (2) a targeted follow-up fetch of the closest candidate,
+*1-2-3 Check* (arXiv 2508.07667, ACL LLMSEC 2025 — multi-agent iterative reasoning for contextual privacy),
+confirmed it has **no retrieval step at all** (it reasons over given multi-party conversational text, not a
+database/document store), a fixed multi-agent decomposition rather than a loop-back-for-more-evidence mechanism,
+and only a binary leak/no-leak outcome (no redact/refuse/escalate spectrum); (3) a direct fetch of the *SoK:
+Agentic RAG* survey (arXiv 2603.07379) confirmed its "Verification and Self-Correction Modules... integrated
+directly into the iterative loop" are scoped to factual/syntax correctness, and permission-aware iterative
+refinement is not named anywhere, including in its own open-challenges list. **Caveat:** this is evidence from a
+bounded search, not a proof of non-existence — the honest framing is "no evidence found of this combination",
+not "this combination does not exist."
+
+On whether such a loop could ever be more than a probabilistic mitigation (the question that matters for whether
+it belongs anywhere near a security claim): adversarially-verified findings say **no published inference-time
+safety mechanism for RAG/agent leakage furnishes a proof bounding residual leakage in generated natural-language
+answers** — Self-Sanitize, SafeRAG-Steering, and the counterfactual-prompting risk-control line (arXiv 2409.16146)
+all report only measured reductions. Formal proofs **do** exist adjacent to this space — SAG's cryptographic
+IND-CPA proof (arXiv 2508.01084), DP-RAG's proven (ε,δ)-differential-privacy bound (arXiv 2412.19291) — but each
+targets a categorically different threat model (encryption-at-rest, corpus-membership privacy) than row-level
+authorization, and none is a deterministic, row-exact guarantee of the kind the PEP already provides. Separately,
+CI-Work (arXiv 2604.21308, peer-reviewed, ACL 2026 Industry Track, Microsoft Research) found that **scaling model
+size or reasoning depth does not fix contextual-integrity leakage** in complex enterprise-agent tasks — an
+empirical strike against "just add more inference-time compute" as a safety mechanism (the paper notes simpler
+contextual-integrity benchmarks *do* improve with scale, so this negative result should not be read as universal).
+
+**If pursued:** the correct framing is a bounded, deterministic-demo-first residual-reduction layer that sits
+**on top of, and never substitutes for**, the PEP's row-domain enforcement — measuring by how much it reduces the
+already-quantified answer-channel residual (§10.1.3's ~50% evasion rate), never claimed as closing it. This
+mirrors the TB.1→TB.3→TB.2 "reduces, does not close" pattern already used for the integrity stack (§6).
+
+### 12.2 Self-improving RAG (feedback-gated retraining)
+
+The candidate pipeline: production query logs → evaluate correctness/citation-coverage/retrieval-miss/permission-violation
+→ synthesize new hard cases from real failures → train/fine-tune the retriever, reranker, a critic model, and/or
+a "policy router" → gate any update behind regression **and** security tests → deploy with versioning/rollback.
+
+Retraining the **retrieval/relevance** side from feedback is well-precedented and low-risk: SimRAG (NAACL 2025)
+self-trains the generator from synthetic QA pairs; a 2025 RAG-feedback survey (arXiv 2508.15437) explicitly
+argues retrieval should be treated as a learnable, feedback-updatable component — though it is silent on whether
+authorization belongs in that learnable set (a gap in the survey, not a position either way).
+
+Retraining the **authorization-decision or policy-routing** component from the same feedback loop is a real,
+actively-explored minority pattern — not merely a hypothetical anti-pattern. AgentGuardian (arXiv 2601.10440)
+is a published counter-example: it *learns* ABAC-style tool-call policies from staging-phase execution traces,
+uses a generative LLM (Claude Sonnet 4.5) to synthesize the final rule set, and is explicitly designed to be
+periodically retrained from new execution data. Tellingly, its own reported numbers demonstrate exactly the
+fragility the deterministic camp warns about: a non-zero miss rate (18/20 violations caught, FAR=0.10) and a
+6× increase in benign-execution failures when the underlying orchestrator LLM is swapped for a weaker model
+(gpt-4.1→gpt-4o-mini: 4→24 and 2→13 failures across its two evaluated applications) — i.e., the strongest
+published example of a learned authorization component also empirically shows why keeping authorization
+deterministic is the safer choice.
+
+The deterministic-authorization camp is independently well-corroborated, with real proofs and one real production
+deployment: **OAP** (arXiv 2603.20953) defines authorization as a provably deterministic function (no sampling,
+no time-dependent branches) with a formal proof (Proposition 1) of five security properties, and reports tightening
+the deterministic policy (not any learned component) collapsed an adversarial success rate from 74.6% to 0% across
+879 attempts; **SEAgent** (the MAC framework already cited in §8, arXiv 2601.11893) enforces via deterministic
+first-match rule lookup over a policy DB, never delegating the authorization call to the LLM — convergent evidence
+for this artifact's own confused-deputy framing, since the same paper independently formalizes "confused deputy
+attacks" via agent-to-agent messages. The **Causality Laundering** paper already cited in §8 (arXiv 2604.04035)
+turns out to be doubly relevant here: its own proposed defense, the **Agentic Reference Monitor (ARM)**, mediates
+every tool call via deterministic provenance-graph traversal — never delegated to the LLM — and the paper's central
+finding (an adversary inferring sensitive information purely from a *denial* outcome, invisible to defenses that
+track only successful data flow) is independent corroboration that denial-channel leakage — this artifact's
+uniform-denial layer, §4.4/RQ5 — is a recognized, serious attack class, not a construct specific to this evaluation.
+A September-2025 position paper (the "participant-aware access control" line already cited in §8) makes the
+strongest real-world case: it cites a real incident (Microsoft Copilot exposing HR documents and CEO emails to
+unauthorized users) as motivation for keeping access control deterministic, and its approach ships in production
+(Microsoft Copilot Tuning).
+
+Two sub-questions returned **no confirmed literature either way** (an open gap, not a settled absence): whether
+an adversary can poison future retrieval/reranking behavior specifically by shaping production feedback logs
+(distinct from single-turn prompt/tool-output injection — PoisonedRAG's corpus-injection attack, USENIX
+Security 2025, is the closest precedent but is a static one-shot corpus attack, not a feedback-loop attack), and
+whether any published MLOps-style canary/versioning/rollback discipline has been applied specifically to RAG/
+retrieval components. A single non-peer-reviewed preprint (a January 2026 ResearchSquare posting on recursive
+self-consumption in closed-loop RAG, cited here only as a preliminary signal, not a confirmed finding) reports
+exponential contamination growth in a system that recycles its own generated content without provenance
+tracking — a concrete argument for explicit provenance-tagging of any auto-synthesized hard case, whatever the
+outcome of the open questions above.
+
+**If pursued:** the evidence supports training the relevance/ranking side of a self-improving pipeline as
+low-risk and well-precedented, while keeping the row-domain/authorization computation itself — the actual PEP —
+outside the training loop, deterministic, and hand-verified, exactly as it is today. This is not a normative
+claim manufactured for this artifact: it is what the deterministic camp's proofs and production deployment, and
+the learned camp's own reported fragility, converge on independently.
