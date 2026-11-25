@@ -14,7 +14,7 @@ result tables, the closure compiler, related work, limitations).
 
 It runs **end-to-end on the mock + synthetic data with no access to any private code** — so the
 results are reproducible by reviewers. The same `pg_agent_guard` is separately validated against
-the real private `pco_core` inside the company monorepo.
+a real private ERP module in a separate private repository.
 
 ## Citation & license
 
@@ -38,12 +38,9 @@ and assigns the DOI automatically. See [REPRODUCE.md](REPRODUCE.md#7-archival-an
 
 > **The public repo NEVER references the private one. Only the private repo references the public one.**
 
-The real business code (`pco_core`) is *not* embedded here. The private monorepo consumes this
+The real business code is *not* embedded here. A private repository consumes this
 public repo as a pinned submodule for validation (see `scripts/setup_submodule.sh`). This keeps
 public git history clean by construction and removes the leak foot-gun of a public→private link.
-
-Design rationale and the public/mock/private boundary: **`docs/pg-agent/mock-boundary-spec.md`**
-(currently in the private monorepo; move it here when publishing).
 
 ## Layout
 
@@ -63,7 +60,7 @@ pg-agent/
 │       ├── services/denial.py      #   T2.4 uniform empty result + constant-time floor/jitter
 │       ├── services/output_validator.py  # T2.3 pure answer scanner (no Odoo/LLM)
 │       ├── services/numeric_verifier.py   # TB.1 pure numeric verifier — RQ6 (no Odoo/LLM)
-│       ├── audit/audit_log.py      #   INDEPENDENT audit (stdlib logging + ir.logging; no tdh_audit)
+│       ├── audit/audit_log.py      #   INDEPENDENT audit (stdlib logging + ir.logging; no AGPL dependency)
 │       └── security/pep_groups.xml
 ├── data/erp_authzbench/
 │   ├── generate_synthetic.py       # deterministic synthetic generator (no real data)
@@ -147,7 +144,7 @@ under V-rule the naive line rule plugs line create/overwrite/unlink but **reassi
 siblings still breach** (Odoo record rules are USING-only) — all closed by the write-check. See [`results/write_attacks.csv`](results/write_attacks.csv).
 
 Two schema variants (toggle the data file in `pco_core_mock/__manifest__.py`):
-- **V-vuln** (`team_security.xml`) — faithful to production; header-only team rule.
+- **V-vuln** (`team_security.xml`) — the common pattern: a team rule on the header model only.
 - **V-rule** (`team_security_vrule.xml`) — naive line-only fix.
 
 The guard is **safe on every class in both variants** (variant-independent by design). Exact
@@ -384,7 +381,7 @@ model — no native company rule exists anywhere (the tenant-bypass vector). Com
 ### Scale scan on real Odoo CE (F10 Increment 1)
 
 [`tests/policy_scan.py`](tests/policy_scan.py) generalizes the linter to *any* module set and runs it on **vanilla
-Odoo CE `sale`+`account`+`stock`** — a real, large schema (the private `pco_core` is validated separately via
+Odoo CE `sale`+`account`+`stock`** — a real, large schema (private modules are validated separately via
 `odoo.prod.conf`, never in this public repo). It is **purely static/read-only**: it auto-discovers the governance
 graph from `ir.model.fields` + `ir.rule` with two semantic filters — **context-bound discriminators** (a field is
 an axis only if a rule leaf binds it to the user/company context, via
@@ -549,11 +546,9 @@ embedding RAG rate, a secured index/ranker, or universal correctness.
 - Regenerate the baseline once locally: `detect-secrets scan > .detect-secrets.baseline`.
 - Synthetic data is **generated**, never anonymized from production.
 
-## Open decision
+## License
 
-- **License:** deferred. The guard's `audit/` is deliberately isolated from the company's AGPL
-  `tdh_audit`, so the academic/commercial license can be chosen later without AGPL network-clause
-  contamination. Pick before publishing.
+MIT (see `LICENSE`). The guard's `audit/` is self-contained and does not depend on any AGPL module.
 
 ## First-time setup of this repo (clean history)
 

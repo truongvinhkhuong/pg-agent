@@ -15,13 +15,13 @@ Guarantees (see docs/pg-agent/mock-boundary-spec.md §3):
   - multi-company (tenant) scoping via `company_path`
   - optional least-privilege ownership scoping via `owner_path`
   - FAIL-CLOSED: any model without an explicit policy entry is DENIED
-  - every decision is recorded by an INDEPENDENT audit module (no tdh_audit; AGPL-free)
+  - every decision is recorded by an INDEPENDENT audit module (AGPL-free)
 
 The guard depends ONLY on the contract surface present in BOTH the public mock and
 the real private pco_core, so the same code runs unchanged in both repos.
 """,
     # License decision deferred (spec §5). The audit submodule is deliberately
-    # isolated from the AGPL `tdh_audit` library so this guard stays AGPL-free and
+    # isolated from any AGPL audit library so this guard stays AGPL-free and
     # the academic/commercial license can be chosen later without contamination.
     "license": "LGPL-3",
     "author": "PG-Agent (academic)",

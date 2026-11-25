@@ -18,7 +18,7 @@ authors:
 repository-code: "https://github.com/truongvinhkhuong/pg-agent"
 license: MIT
 version: "1.0.0"
-# date-released: update to the actual Zenodo release date, e.g. 2026-07-01
+date-released: "2026-11-26"
 keywords:
   - LLM agents
   - ERP security

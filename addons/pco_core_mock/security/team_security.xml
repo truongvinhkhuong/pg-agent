@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <!-- ============================================================
-         VARIANT V-vuln  (BASELINE — faithful to production today)
+         VARIANT V-vuln  (BASELINE — common header-only pattern)
          ============================================================
          Team isolation ir.rule on the HEADER ONLY (pco.sale.order).
          The child models (line / payment / guarantee) get READ ACL via

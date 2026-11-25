@@ -2,7 +2,7 @@
 """Experimental attack cases — NOT part of the v3.1 core suite.
 
 These exercise the guard's generality on authorization axes that are NOT grounded in
-a real gap of the production system, so they stay out of the headline benchmark and
+a gap observed only in private validation, so they stay out of the headline benchmark and
 are clearly separated for the paper. Run them only when explicitly evaluating the
 PEP's model-agnostic generality.
 

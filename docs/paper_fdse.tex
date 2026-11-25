@@ -129,7 +129,7 @@ A public, reproducible adversarial benchmark for row-level authorization of ERP 
 carries \code{team_code}+\code{company_id}) and three children (\code{.line}/\code{.payment}/\code{.guarantee},
 each \code{order_id}$\to$header); authz-relevant field \emph{names} verbatim (the guard contract), no business
 logic, no real data. \textbf{Two schema variants} (the heart of the benchmark): \textbf{V-vuln} = team rule on the
-header only (faithful to production); \textbf{V-rule} = a na\"ive fix that rules the line but forgets the
+header only (the common pattern); \textbf{V-rule} = a na\"ive fix that rules the line but forgets the
 payment/guarantee siblings (the guard column is variant-independent). \textbf{Synthetic data}
 (\code{generate_synthetic.py}): deterministic (\code{seed=42}), generated --- never anonymized. \textbf{Attack
 suite} (\code{attacks.py}): 5 core classes (\code{relational-traversal}, \code{aggregation-leak},

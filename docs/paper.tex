@@ -182,7 +182,7 @@ A public, reproducible adversarial benchmark for row-level authorization of ERP 
         (\code{.line}/\code{.payment}/\code{.guarantee}, each \code{order_id} $\to$ header). Authz-relevant
         field \emph{names} are kept verbatim (they are the guard contract); no business logic, no real data.
   \item \textbf{Two schema variants} (the heart of the benchmark): \textbf{V-vuln} = team rule on the header
-        only (faithful to production); \textbf{V-rule} = a na\"ive fix that adds a rule on the line but
+        only (the common pattern); \textbf{V-rule} = a na\"ive fix that adds a rule on the line but
         forgets the payment/guarantee siblings. The guard column is variant-independent by construction.
   \item \textbf{Synthetic data} (\code{generate_synthetic.py}): deterministic (\code{seed=42}), generated ---
         never anonymized from production.

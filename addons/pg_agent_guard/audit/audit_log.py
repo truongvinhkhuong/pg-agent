@@ -5,7 +5,7 @@ Records every guard decision using ONLY:
   1. the Python standard `logging` module, and
   2. Odoo core `ir.logging` (persistent, queryable).
 
-It deliberately does NOT depend on the company's AGPL `tdh_audit` module, so the
+It deliberately does NOT depend on any AGPL audit module, so the
 public guard stays free of AGPL network-clause obligations. Keep this file
 dependency-light and self-contained.
 """

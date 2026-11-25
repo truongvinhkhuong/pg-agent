@@ -24,7 +24,7 @@ Authz-relevant field NAMES are kept verbatim (team_code, order_id, customer_name
 amount_total, company_id, salesperson_id) because they ARE the guard contract.
 """,
     # License decision deferred (spec §5). Provisional LGPL-3 to match Odoo norm.
-    # The guard's audit module is isolated from AGPL `tdh_audit` regardless of this choice.
+    # The guard's audit module is isolated from any AGPL audit module regardless of this choice.
     "license": "LGPL-3",
     "author": "PG-Agent (academic)",
     "category": "Research/Benchmark",
