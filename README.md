@@ -1,6 +1,7 @@
 # PG-Agent — Permission-aware RAG over Odoo ERP + ERP-AuthZBench
 
 [![CI](https://github.com/truongvinhkhuong/pg-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/truongvinhkhuong/pg-agent/actions/workflows/ci.yml)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24545718.svg)](https://doi.org/10.5281/zenodo.24545718)
 
 Public academic artifact for a permission-aware RAG agent on Odoo. It ships:
 
@@ -23,16 +24,14 @@ Licensed under the [MIT License](LICENSE). If you use this artifact, please cite
 
 For a permanent, citable, immutable archive it is published on **Zenodo** with a **DOI**:
 
-**DOI:** *pending — assigned automatically on the first Zenodo release (steps below).*
-<!-- After the first release, replace XXXXXXX with the concept DOI and uncomment:
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
-> Truong Vinh Khuong. *PG-Agent & ERP-AuthZBench: Authorization-Preserving LLM Agents over ERP, with a
-> Policy-Closure Compiler.* Zenodo, 2026. https://doi.org/10.5281/zenodo.XXXXXXX
--->
+**DOI (all versions):** [10.5281/zenodo.24545718](https://doi.org/10.5281/zenodo.24545718)
 
-To mint the DOI: at [zenodo.org](https://zenodo.org) **Log in with GitHub → toggle this repo on**, then publish a
-GitHub **Release** (e.g. `v1.0.0`) — Zenodo archives the tagged snapshot (driven by [`.zenodo.json`](.zenodo.json))
-and assigns the DOI automatically. See [REPRODUCE.md](REPRODUCE.md#7-archival-and-citation-zenodo).
+> Truong Vinh Khuong. *PG-Agent & ERP-AuthZBench: Authorization-Preserving LLM Agents over ERP, with a
+> Policy-Closure Compiler.* Zenodo, 2026. https://doi.org/10.5281/zenodo.24545718
+
+New versions: publish a GitHub **Release** (e.g. `v1.1.0`) — Zenodo archives the tagged snapshot under the same
+concept DOI (driven by [`.zenodo.json`](.zenodo.json))
+and assigns a new version DOI automatically. See [REPRODUCE.md](REPRODUCE.md#7-archival-and-citation-zenodo).
 
 ## Architecture principle (read first)
 

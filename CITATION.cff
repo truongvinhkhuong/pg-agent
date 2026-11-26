@@ -28,7 +28,8 @@ keywords:
   - relational-traversal
   - Odoo
   - policy-closure compiler
-# identifiers:
-#   - type: doi
-#     value: 10.5281/zenodo.XXXXXXX   # concept DOI from Zenodo (after first release)
-#     description: Concept DOI (all versions)
+doi: 10.5281/zenodo.24545718
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.24545718
+    description: Concept DOI (all versions)
